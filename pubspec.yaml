@@ -9,8 +9,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # 蓝牙/WiFi 直连（Android: Nearby Connections; iOS: MultipeerConnectivity）
-  flutter_nearby_connections: ^1.1.2
 
 dev_dependencies:
   flutter_test:

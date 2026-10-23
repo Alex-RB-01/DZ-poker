@@ -65,48 +65,6 @@ jobs:
       - name: 获取依赖
         run: flutter pub get
 
-      # flutter_nearby_connections 1.1.2 太老，其 android/build.gradle 用了已废弃的
-      # jcenter()、缺少 AGP 8 必需的 namespace、且 Java/Kotlin JVM 目标不一致(11 vs 17)。
-      # 这里自动修补，保留 LAN 联机功能。
-      - name: 修补老旧插件以兼容新版 Gradle/AGP
-        run: |
-          python3 - <<'PY'
-          import re, glob, os
-          base = os.path.expanduser('~/.pub-cache/hosted/pub.dev')
-          for p in glob.glob(os.path.join(base, 'flutter_nearby_connections-*', 'android', 'build.gradle')):
-              s = open(p, encoding='utf-8').read()
-              orig = s
-              if 'jcenter()' in s:
-                  s = s.replace('jcenter()', 'mavenCentral()')
-                  print('jcenter -> mavenCentral')
-              if 'namespace' not in s:
-                  mans = glob.glob(os.path.join(os.path.dirname(p), 'src', 'main', 'AndroidManifest.xml'))
-                  if mans:
-                      mp = open(mans[0], encoding='utf-8').read()
-                      m = re.search(r'package="([^"]+)"', mp)
-                      if m:
-                          s = s.replace('android {', 'android {\n        namespace "%s"' % m.group(1), 1)
-                          print('added namespace', m.group(1))
-              # Java 11 vs Kotlin 17 不一致 -> 统一到 17
-              for old, new in [('JavaVersion.VERSION_11', 'JavaVersion.VERSION_17'),
-                               ('JavaVersion.VERSION_1_8', 'JavaVersion.VERSION_17')]:
-                  if old in s:
-                      s = s.replace(old, new)
-                      print('bumped', old, '->', new)
-              if 'jvmTarget' not in s:
-                  s = s.replace('android {',
-                      'android {\n    compileOptions {\n        sourceCompatibility JavaVersion.VERSION_17\n        targetCompatibility JavaVersion.VERSION_17\n    }\n    kotlinOptions {\n        jvmTarget = "17"\n    }', 1)
-                  print('added compileOptions/kotlinOptions')
-              else:
-                  s = re.sub(r"jvmTarget\s*=\s*[\"']?[0-9_.]+[\"']?", "jvmTarget = '17'", s)
-                  print('normalized jvmTarget')
-              if s != orig:
-                  open(p, 'w', encoding='utf-8').write(s)
-                  print('patched', p)
-              else:
-                  print('no change needed', p)
-          PY
-
       - name: 静态分析（仅提示，不阻断打包）
         run: flutter analyze || true
 

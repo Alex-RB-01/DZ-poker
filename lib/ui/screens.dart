@@ -25,7 +25,7 @@ class HomeScreen extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                     color: AppTheme.gold)),
             const SizedBox(height: 8),
-            const Text('蓝牙局域网 · 最多 10 人 · 锦标赛盲注',
+            const Text('单机 AI · 最多 10 人 · 锦标赛盲注',
                 style: TextStyle(color: Colors.white54)),
             const SizedBox(height: 48),
             _MenuButton(
@@ -33,18 +33,6 @@ class HomeScreen extends StatelessWidget {
               label: '单机对战（AI）',
               onTap: () => Navigator.push(context,
                   MaterialPageRoute(builder: (_) => const LobbyScreen(local: true))),
-            ),
-            _MenuButton(
-              icon: Icons.wifi_tethering,
-              label: '创建蓝牙房间（当房主）',
-              onTap: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const LobbyScreen(local: false))),
-            ),
-            _MenuButton(
-              icon: Icons.group_add,
-              label: '加入蓝牙房间',
-              onTap: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const JoinScreen())),
             ),
             const SizedBox(height: 32),
             const Text('虚拟筹码 · 仅供娱乐，不涉及任何真实货币',
