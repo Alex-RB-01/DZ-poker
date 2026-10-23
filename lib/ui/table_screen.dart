@@ -258,7 +258,6 @@ class _TableArea extends StatelessWidget {
 
     // 座位中心所在的椭圆（贴边排布）
     final a = w / 2 - seatW / 2 - 4.0;
-    final b = h / 2 - seatH / 2 - 4.0;
 
     // 计算相邻座位最小水平间距，防止座位互相遮挡
     var minHGap = double.infinity;

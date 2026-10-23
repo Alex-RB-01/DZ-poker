@@ -76,7 +76,8 @@ class LanTransport {
     try {
       _udp = await RawDatagramSocket.bind(InternetAddress.anyIPv4, udpPort);
       try {
-        await _udp!.joinMulticast(InternetAddress(multicastGroup));
+        // joinMulticast 返回 void（非 Future），不可 await
+        _udp!.joinMulticast(InternetAddress(multicastGroup));
       } catch (_) {
         // 部分设备/网络禁用组播，不影响 TCP 直连
       }
@@ -196,7 +197,9 @@ class LanTransport {
   }
 
   void broadcast(String data) {
-    for (final p in _peersById.values) p.send(data);
+    for (final p in _peersById.values) {
+      p.send(data);
+    }
   }
 
   Future<void> stop() async {
