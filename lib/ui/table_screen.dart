@@ -4,14 +4,45 @@ library;
 import 'dart:math';
 
 import 'package:flutter/material.dart' hide Card;
+import 'package:flutter/services.dart';
 
 import '../engine/game.dart';
+import '../net/transport.dart';
 import '../state/controller.dart';
 import 'theme.dart';
 
-class GameScreen extends StatelessWidget {
+class GameScreen extends StatefulWidget {
   final GameController controller;
   const GameScreen({super.key, required this.controller});
+
+  @override
+  State<GameScreen> createState() => _GameScreenState();
+}
+
+class _GameScreenState extends State<GameScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // 牌桌专横屏：把完整桌面与 10 人座位都摊开
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+  }
+
+  @override
+  void dispose() {
+    // 关闭牌桌时一并释放控制器（停掉 AI 计时器 / 网络会话）
+    widget.controller.dispose();
+    // 恢复自动旋转
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -20,8 +51,8 @@ class GameScreen extends StatelessWidget {
       child: Scaffold(
         body: SafeArea(
           child: AnimatedBuilder(
-            animation: controller,
-            builder: (context, _) => _Body(controller: controller),
+            animation: widget.controller,
+            builder: (context, _) => _Body(controller: widget.controller),
           ),
         ),
       ),
@@ -211,24 +242,50 @@ class _TableArea extends StatelessWidget {
     final w = size.width;
     final h = size.height;
     final n = g.players.length;
+    if (n == 0) return const SizedBox.shrink();
 
     // 座位顺序：自己(或观战时座位0)在底部，顺时针排布
     final ordered = <int>[
       for (var i = 0; i < n; i++) (controller.mySeat + i) % n
     ];
+    final angles = <double>[
+      for (var d = 0; d < n; d++) (90 + 360 * d / n) * pi / 180
+    ];
 
-    final seatW = min(w * 0.30, 150.0);
-    final seatH = 96.0;
+    // 座位盒：紧凑但信息完整（昵称/筹码/状态/底牌），不与中央桌面重叠
+    const seatH = 76.0;
+    var seatW = min(w * 0.22, 150.0);
+
+    // 座位中心所在的椭圆（贴边排布）
+    final a = w / 2 - seatW / 2 - 4.0;
+    final b = h / 2 - seatH / 2 - 4.0;
+
+    // 计算相邻座位最小水平间距，防止座位互相遮挡
+    var minHGap = double.infinity;
+    for (var i = 0; i < n; i++) {
+      final dcos = (cos(angles[i]) - cos(angles[(i + 1) % n])).abs();
+      final gap = a * dcos;
+      if (gap < minHGap) minHGap = gap;
+    }
+    seatW = max(60.0, min(seatW, minHGap - 6));
+
+    // 用夹紧后的 seatW 重新计算贴边椭圆
+    final a2 = w / 2 - seatW / 2 - 4.0;
+    final b2 = h / 2 - seatH / 2 - 4.0;
+
+    // 中央桌面椭圆：严格位于座位环内侧，留 10px 间隙，绝不遮挡中央公共牌
+    final tableA = max(40.0, a2 - seatW / 2 - 12.0);
+    final tableB = max(30.0, b2 - seatH / 2 - 12.0);
 
     final children = <Widget>[
       // 桌面
       Center(
         child: Container(
-          width: w * 0.82,
-          height: h * 0.72,
+          width: tableA * 2,
+          height: tableB * 2,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(h * 0.36),
-            border: Border.all(color: AppTheme.tableRim, width: 10),
+            borderRadius: BorderRadius.circular(tableB),
+            border: Border.all(color: AppTheme.tableRim, width: 8),
             gradient: const RadialGradient(
               colors: [AppTheme.tableGreen, AppTheme.tableGreenDark],
             ),
@@ -265,12 +322,12 @@ class _TableArea extends StatelessWidget {
 
     for (var d = 0; d < n; d++) {
       final seat = ordered[d];
-      final rad = (90 + 360 * d / n) * pi / 180;
-      final dx = cos(rad) * (w * 0.38);
-      final dy = sin(rad) * (h * 0.36);
+      final rad = angles[d];
+      final cx = w / 2 + a2 * cos(rad);
+      final cy = h / 2 + b2 * sin(rad);
       children.add(Positioned(
-        left: w / 2 + dx - seatW / 2,
-        top: h / 2 + dy - seatH / 2,
+        left: cx - seatW / 2,
+        top: cy - seatH / 2,
         child: SeatView(
           controller: controller,
           seat: seat,
@@ -309,11 +366,39 @@ class SeatView extends StatelessWidget {
             ? Colors.white12
             : Colors.white24;
 
+    // 底牌：自己/摊牌亮真牌；其余持牌者显示牌背；未持牌不显示
+    final List<Widget> cardRow;
+    if (!p.hasCards) {
+      cardRow = [const SizedBox(height: 22)];
+    } else if (showCards) {
+      cardRow = [
+        for (final c in p.hole)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 1),
+            child: CardView(card: c, width: 20, small: true),
+          ),
+      ];
+    } else {
+      cardRow = [
+        CardView.back(width: 20, small: true),
+        const SizedBox(width: 2),
+        CardView.back(width: 20, small: true),
+      ];
+    }
+
+    final statusText = p.out
+        ? '已出局'
+        : p.allIn
+            ? 'ALL-IN'
+            : p.folded
+                ? '弃牌'
+                : (g.toAct == seat && !g.handOver ? '思考中…' : '');
+
     return Opacity(
       opacity: p.folded ? 0.45 : 1,
       child: Container(
         width: width,
-        padding: const EdgeInsets.all(4),
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
         decoration: BoxDecoration(
           color: seat == controller.mySeat
               ? Colors.blueGrey.shade800.withOpacity(0.92)
@@ -337,49 +422,30 @@ class SeatView extends StatelessWidget {
                             fontWeight: FontWeight.bold)),
                   ),
                 CircleAvatar(
-                  radius: 11,
+                  radius: 9,
                   backgroundColor: p.isAI ? Colors.teal : AppTheme.callBlue,
                   child: Text(p.name.isNotEmpty ? p.name[0] : '?',
-                      style: const TextStyle(fontSize: 11)),
+                      style: const TextStyle(fontSize: 10)),
                 ),
                 const SizedBox(width: 4),
                 Flexible(
                   child: Text(p.name,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.bold)),
+                          fontSize: 11, fontWeight: FontWeight.bold)),
                 ),
               ],
             ),
             Text(AppTheme.money(p.chips),
-                style: const TextStyle(fontSize: 12, color: AppTheme.gold)),
-            if (p.hasCards)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  for (final card in (showCards ? p.hole : const []))
-                    Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 1),
-                        child: CardView(card: card, width: 24, small: true)),
-                  if (!showCards) ...[
-                    CardView.back(width: 24, small: true),
-                    const SizedBox(width: 2),
-                    CardView.back(width: 24, small: true),
-                  ],
-                ],
-              )
-            else
-              const SizedBox(height: 20),
+                style: const TextStyle(fontSize: 11, color: AppTheme.gold)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: cardRow,
+            ),
             Text(
-              p.out
-                  ? '已出局'
-                  : p.allIn
-                      ? 'ALL-IN'
-                      : p.folded
-                          ? '弃牌'
-                          : (g.toAct == seat && !g.handOver ? '思考中…' : ''),
+              statusText,
               style: TextStyle(
-                  fontSize: 10,
+                  fontSize: 9,
                   color: p.allIn
                       ? AppTheme.allinOrange
                       : p.folded
@@ -388,6 +454,7 @@ class SeatView extends StatelessWidget {
             ),
             if (p.roundBet > 0 && !g.handOver)
               Container(
+                margin: const EdgeInsets.only(top: 2),
                 padding:
                     const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                 decoration: BoxDecoration(
@@ -395,7 +462,7 @@ class SeatView extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text('下注 ${p.roundBet}',
-                    style: const TextStyle(fontSize: 10)),
+                    style: const TextStyle(fontSize: 9)),
               ),
           ],
         ),
@@ -882,6 +949,15 @@ class _HostLobby extends StatefulWidget {
 
 class _HostLobbyState extends State<_HostLobby> {
   int _aiFill = 2;
+  String _ip = '获取中…';
+
+  @override
+  void initState() {
+    super.initState();
+    localIpAddress().then((v) {
+      if (mounted) setState(() => _ip = v);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -891,7 +967,7 @@ class _HostLobbyState extends State<_HostLobby> {
     final total = 1 + clients.length + _aiFill;
     return Scaffold(
       backgroundColor: AppTheme.bg,
-      appBar: AppBar(title: const Text('蓝牙房间等候中')),
+      appBar: AppBar(title: const Text('房间等候中（同 WiFi）')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -906,6 +982,17 @@ class _HostLobbyState extends State<_HostLobby> {
               leading: const CircleAvatar(child: Icon(Icons.person_outline)),
               title: Text(name),
             ),
+          Container(
+            margin: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.black26,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+                '本机局域网 IP：$_ip（端口 ${LanTransport.tcpPort}）\n若对方“加入房间”里搜不到，可让对方手动输入此 IP 连接。',
+                style: const TextStyle(fontSize: 12, color: Colors.white70)),
+          ),
           const Divider(),
           Text('AI 补位数量：$_aiFill（总人数 $total / 10）',
               style: const TextStyle(color: Colors.white70)),

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../engine/game.dart';
 import '../net/session.dart';
+import '../net/transport.dart';
 import '../state/controller.dart';
 import 'table_screen.dart';
 import 'theme.dart';
@@ -25,14 +26,28 @@ class HomeScreen extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                     color: AppTheme.gold)),
             const SizedBox(height: 8),
-            const Text('单机 AI · 最多 10 人 · 锦标赛盲注',
+            const Text('单机 AI · 同 WiFi 联机 · 最多 10 人 · 锦标赛盲注',
                 style: TextStyle(color: Colors.white54)),
-            const SizedBox(height: 48),
+            const SizedBox(height: 40),
             _MenuButton(
-              icon: Icons.person,
+              icon: Icons.smartphone,
               label: '单机对战（AI）',
               onTap: () => Navigator.push(context,
                   MaterialPageRoute(builder: (_) => const LobbyScreen(local: true))),
+            ),
+            const SizedBox(height: 16),
+            _MenuButton(
+              icon: Icons.wifi_tethering,
+              label: '创建房间（房主）',
+              onTap: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const LobbyScreen(local: false))),
+            ),
+            const SizedBox(height: 16),
+            _MenuButton(
+              icon: Icons.login,
+              label: '加入房间（同 WiFi）',
+              onTap: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const JoinScreen())),
             ),
             const SizedBox(height: 32),
             const Text('虚拟筹码 · 仅供娱乐，不涉及任何真实货币',
@@ -91,7 +106,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-          title: Text(widget.local ? '单机对战' : '创建蓝牙房间')),
+          title: Text(widget.local ? '单机对战' : '创建 Wi-Fi 房间')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -171,7 +186,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
                 backgroundColor: AppTheme.raiseGreen,
                 padding: const EdgeInsets.symmetric(vertical: 16)),
             onPressed: _start,
-            child: Text(widget.local ? '开始游戏' : '开启蓝牙房间并等待玩家',
+            child: Text(widget.local ? '开始游戏' : '创建房间并等待玩家加入',
                 style: const TextStyle(fontSize: 17)),
           ),
         ],
@@ -258,9 +273,10 @@ class JoinScreen extends StatefulWidget {
 
 class _JoinScreenState extends State<JoinScreen> {
   final _nameCtrl = TextEditingController(text: '玩家');
+  final _ipCtrl = TextEditingController();
   ClientSession? _session;
   bool _started = false;
-  String _status = '正在搜索附近房间…';
+  bool _connecting = false;
   GameController? _controller;
 
   @override
@@ -269,33 +285,67 @@ class _JoinScreenState extends State<JoinScreen> {
     _startBrowsing();
   }
 
+  String _name() =>
+      _nameCtrl.text.trim().isEmpty ? '玩家' : _nameCtrl.text.trim();
+
   Future<void> _startBrowsing() async {
-    final name = _nameCtrl.text.trim().isEmpty ? '玩家' : _nameCtrl.text.trim();
     final session = ClientSession(
-        myName: name,
+        myName: _name(),
         onMessage: _onMsg,
         onChanged: () {
           if (mounted) setState(() {});
         });
     _session = session;
     await session.start();
-    if (mounted) {
-      setState(() => _started = true);
-    }
+    if (mounted) setState(() => _started = true);
   }
 
   void _onMsg(Map<String, dynamic> msg) {
+    if (_controller != null) {
+      _controller!.onClientMessage(msg);
+      return;
+    }
     if (msg['t'] == 'seat') {
-      final c = GameController.client(
-          myName:
-              _nameCtrl.text.trim().isEmpty ? '玩家' : _nameCtrl.text.trim(),
-          session: _session!);
+      final c = GameController.client(myName: _name(), session: _session!);
       c.onClientMessage(msg);
       _controller = c;
       if (!mounted) return;
       Navigator.pushReplacement(context,
           MaterialPageRoute(builder: (_) => GameScreen(controller: c)));
     }
+  }
+
+  Future<void> _join(HostBeacon b) async {
+    if (_connecting) return;
+    setState(() => _connecting = true);
+    try {
+      await _session!.join(b.addr, b.port, _name());
+    } catch (_) {
+      if (mounted) {
+        setState(() => _connecting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('无法连接到 ${b.addr}，请确认同一 Wi-Fi')));
+      }
+      return;
+    }
+    if (mounted) setState(() => _connecting = false);
+  }
+
+  Future<void> _joinManual() async {
+    final ip = _ipCtrl.text.trim();
+    if (ip.isEmpty || _connecting) return;
+    setState(() => _connecting = true);
+    try {
+      await _session!.join(ip, LanTransport.tcpPort, _name());
+    } catch (_) {
+      if (mounted) {
+        setState(() => _connecting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('无法连接，请检查 IP 与 Wi-Fi')));
+      }
+      return;
+    }
+    if (mounted) setState(() => _connecting = false);
   }
 
   @override
@@ -309,7 +359,7 @@ class _JoinScreenState extends State<JoinScreen> {
   Widget build(BuildContext context) {
     final hosts = _session?.hosts ?? {};
     return Scaffold(
-      appBar: AppBar(title: const Text('加入蓝牙房间')),
+      appBar: AppBar(title: const Text('加入同 WiFi 房间')),
       body: Column(
         children: [
           Padding(
@@ -325,36 +375,57 @@ class _JoinScreenState extends State<JoinScreen> {
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                !_started ? '正在初始化蓝牙…' : (hosts.isEmpty ? '未发现房间，请确认房主已创建且双方蓝牙/定位权限已开启' : '发现 ${hosts.length} 个房间'),
+                !_started
+                    ? '正在初始化…'
+                    : (hosts.isEmpty
+                        ? '未发现房间，可用下方手动输入主机 IP'
+                        : '发现 ${hosts.length} 个房间'),
                 style: const TextStyle(color: Colors.white54),
               ),
             ),
           ),
           Expanded(
             child: ListView(
-              children: hosts.entries
-                  .map((e) => ListTile(
+              children: hosts.values
+                  .map((b) => ListTile(
                         leading: const Icon(Icons.table_restaurant,
                             color: AppTheme.gold),
-                        title: Text(e.value),
-                        subtitle: Text('点击加入 · ${e.key}'),
-                        onTap: _started
-                            ? () async {
-                                setState(() => _status = '正在加入…');
-                                await _session!.join(
-                                    e.key,
-                                    _nameCtrl.text.trim().isEmpty
-                                        ? '玩家'
-                                        : _nameCtrl.text.trim());
-                              }
-                            : null,
+                        title: Text(b.name),
+                        subtitle: Text('${b.addr} · 点击加入'),
+                        onTap: _started ? () => _join(b) : null,
                       ))
                   .toList(),
             ),
           ),
+          const Divider(),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _ipCtrl,
+                    decoration: const InputDecoration(
+                        labelText: '主机 IP（手动）',
+                        hintText: '如 192.168.1.5',
+                        border: OutlineInputBorder()),
+                    keyboardType: TextInputType.number,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: _connecting ? null : _joinManual,
+                  child: const Text('连接'),
+                ),
+              ],
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.all(12),
-            child: Text(_status,
+            child: Text(
+                _connecting
+                    ? '正在连接…'
+                    : '房间由“创建房间”一方开启，双方须连同一 Wi-Fi',
                 style: const TextStyle(fontSize: 12, color: Colors.white38)),
           ),
         ],
