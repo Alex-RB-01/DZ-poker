@@ -11,6 +11,7 @@ class AppTheme {
   static const tableRim = Color(0xFF6d4c35);
   static const gold = Color(0xFFe6c25a);
   static const cardRed = Color(0xFFd32f2f);
+  static const clubBlue = Color(0xFF0d47a1); // 梅花用蓝，便于与黑桃区分
   static const foldRed = Color(0xFFc62828);
   static const callBlue = Color(0xFF1565c0);
   static const raiseGreen = Color(0xFF2e7d32);

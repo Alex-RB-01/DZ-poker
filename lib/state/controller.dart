@@ -127,6 +127,8 @@ class GameController extends ChangeNotifier {
         hostSession?.pendingClients[peerId] =
             (msg['name'] ?? '玩家').toString();
         notifyListeners();
+      case 'next':
+        nextHand();
       case 'action':
         final seat = _seatByPeer[peerId];
         if (seat != null) {
@@ -186,6 +188,15 @@ class GameController extends ChangeNotifier {
     _afterChange();
   }
 
+  /// 请求开下一手：房主/单机直接开；客人发消息请房主开
+  void requestNextHand() {
+    if (mode == GameMode.client) {
+      clientSession?.sendNext();
+    } else {
+      nextHand();
+    }
+  }
+
   void skipBlindLevel() {
     if (mode == GameMode.client) return;
     if (g.advanceLevel()) {
@@ -206,10 +217,7 @@ class GameController extends ChangeNotifier {
     final ticket = _aiTicket;
     if (g.gameOver) return;
     if (g.handOver) {
-      // 4 秒后自动开下一手
-      Future.delayed(const Duration(seconds: 4), () {
-        if (ticket == _aiTicket && g.handOver && !g.gameOver) nextHand();
-      });
+      // 一手结束后停在结算面板，等待「下一手」手动开牌（便于看清楚桌面输赢）
       return;
     }
     if (g.toAct >= 0 && g.players[g.toAct].isAI) {

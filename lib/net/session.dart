@@ -109,5 +109,12 @@ class ClientSession {
         hp, jsonEncode({'t': 'action', 'type': type, 'amount': amount}));
   }
 
+  /// 请求房主开下一手（一手结束后手动继续）
+  Future<void> sendNext() async {
+    final hp = hostPeerId;
+    if (hp == null) return;
+    transport.send(hp, jsonEncode({'t': 'next'}));
+  }
+
   Future<void> stop() => transport.stop();
 }

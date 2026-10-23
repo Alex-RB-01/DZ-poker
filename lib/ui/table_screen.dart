@@ -528,6 +528,10 @@ class CardView extends StatelessWidget {
                         ? '10'
                         : '${c.rank}';
     final fontSize = small ? width * 0.52 : width * 0.42;
+    // 红桃/方块=红；梅花=蓝；黑桃=黑。梅花用蓝避免与黑桃混淆
+    final fg = c.isRed
+        ? AppTheme.cardRed
+        : (c.suit == 3 ? AppTheme.clubBlue : Colors.black87);
     return Container(
       width: width,
       height: h,
@@ -545,12 +549,10 @@ class CardView extends StatelessWidget {
                   fontSize: fontSize,
                   height: 1.0,
                   fontWeight: FontWeight.bold,
-                  color: c.isRed ? AppTheme.cardRed : Colors.black87)),
+                  color: fg)),
           Text(kSuitChars[c.suit],
               style: TextStyle(
-                  fontSize: fontSize * 0.85,
-                  height: 1.0,
-                  color: c.isRed ? AppTheme.cardRed : Colors.black87)),
+                  fontSize: fontSize * 0.85, height: 1.0, color: fg)),
         ],
       ),
     );
@@ -880,9 +882,19 @@ class _ResultPanel extends StatelessWidget {
               ),
             ),
           const Padding(
-            padding: EdgeInsets.only(top: 6),
-            child: Text('下一手即将自动开始…',
-                style: TextStyle(fontSize: 12, color: Colors.white38)),
+            padding: EdgeInsets.only(top: 8),
+            child: Text('看完桌面后，点“下一手”开始新手牌',
+                style: TextStyle(fontSize: 12, color: Colors.white54)),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.raiseGreen,
+                  padding: const EdgeInsets.symmetric(vertical: 14)),
+              onPressed: () => controller.requestNextHand(),
+              child: const Text('下一手', style: TextStyle(fontSize: 17)),
+            ),
           ),
         ],
       ),
