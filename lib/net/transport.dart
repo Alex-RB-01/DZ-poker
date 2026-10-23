@@ -12,7 +12,6 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 
 /// 在局域网中发现到的房间
 class HostBeacon {
@@ -107,19 +106,22 @@ class LanTransport {
     }
   }
 
-  void _onUdp(RawDatagramSocket event) {
-    final dg = event.receive();
-    if (dg == null) return;
-    try {
-      final map = jsonDecode(utf8.decode(dg.data)) as Map<String, dynamic>;
-      if (map['t'] == 'beacon' && !isHost) {
-        final addr = dg.address.address;
-        final port = (map['port'] as num).toInt();
-        final name = (map['name'] ?? '房间').toString();
-        _beacons.add(HostBeacon(
-            id: '$addr:$port', name: name, addr: addr, port: port));
-      }
-    } catch (_) {}
+  void _onUdp(RawSocketEvent event) {
+    if (event != RawSocketEvent.read) return;
+    while (true) {
+      final dg = _udp?.receive();
+      if (dg == null) break;
+      try {
+        final map = jsonDecode(utf8.decode(dg.data)) as Map<String, dynamic>;
+        if (map['t'] == 'beacon' && !isHost) {
+          final addr = dg.address.address;
+          final port = (map['port'] as num).toInt();
+          final name = (map['name'] ?? '房间').toString();
+          _beacons.add(HostBeacon(
+              id: '$addr:$port', name: name, addr: addr, port: port));
+        }
+      } catch (_) {}
+    }
   }
 
   Future<void> _sendBeacon() async {
