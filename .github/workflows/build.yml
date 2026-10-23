@@ -65,6 +65,34 @@ jobs:
       - name: 获取依赖
         run: flutter pub get
 
+      # flutter_nearby_connections 1.1.2 太老，其 android/build.gradle 用了已废弃的
+      # jcenter() 且缺少 AGP 8 必需的 namespace，会导致 Gradle 构建失败。这里自动修补。
+      - name: 修补老旧插件以兼容新版 Gradle/AGP
+        run: |
+          python3 - <<'PY'
+          import re, glob, os
+          base = os.path.expanduser('~/.pub-cache/hosted/pub.dev')
+          for p in glob.glob(os.path.join(base, 'flutter_nearby_connections-*', 'android', 'build.gradle')):
+              s = open(p, encoding='utf-8').read()
+              orig = s
+              if 'jcenter()' in s:
+                  s = s.replace('jcenter()', 'mavenCentral()')
+                  print('jcenter -> mavenCentral')
+              if 'namespace' not in s:
+                  mans = glob.glob(os.path.join(os.path.dirname(p), 'src', 'main', 'AndroidManifest.xml'))
+                  if mans:
+                      mp = open(mans[0], encoding='utf-8').read()
+                      m = re.search(r'package="([^"]+)"', mp)
+                      if m:
+                          s = s.replace('android {', 'android {\n        namespace "%s"' % m.group(1), 1)
+                          print('added namespace', m.group(1))
+              if s != orig:
+                  open(p, 'w', encoding='utf-8').write(s)
+                  print('patched', p)
+              else:
+                  print('no change needed', p)
+          PY
+
       - name: 静态分析（仅提示，不阻断打包）
         run: flutter analyze || true
 

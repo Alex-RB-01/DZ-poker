@@ -3,7 +3,7 @@ library;
 
 import 'dart:math';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Card;
 
 import '../engine/game.dart';
 import '../state/controller.dart';
