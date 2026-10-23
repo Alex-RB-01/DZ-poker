@@ -57,6 +57,7 @@ class GameController extends ChangeNotifier {
     c.g.newGame(roster);
     c.g.startHand();
     c._startBlindTimerIfNeeded();
+    c._afterChange(); // 通知 UI 并启动首个 AI 行动（否则会卡在 AI 思考）
     return c;
   }
 
@@ -219,7 +220,19 @@ class GameController extends ChangeNotifier {
             !g.players[g.toAct].isAI) {
           return;
         }
-        final a = AIPlayer.decide(g, rng);
+        PokerAction a;
+        try {
+          a = AIPlayer.decide(g, rng);
+        } catch (_) {
+          // 决策异常时退化为安全动作，避免永久卡在“思考中”
+          final legal = g.legalActions(g.toAct);
+          a = legal.canCheck
+              ? const PokerAction('check')
+              : (legal.callAmount > 0 &&
+                      legal.callAmount <= g.players[g.toAct].chips
+                  ? const PokerAction('call')
+                  : const PokerAction('fold'));
+        }
         applyAction(g.toAct, a);
       });
     }

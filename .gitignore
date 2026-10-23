@@ -1,16 +1,1 @@
-# Flutter / Dart
-.dart_tool/
-build/
-*.iml
-.android/
-.ios/
-.flutter-plugins
-.flutter-plugins-dependencies
-.flutter-plugins
-pubspec.lock
-
-# 本地产物
-*.apk
-*.aab
-dl/
-dart_sdk/
+release_apk/
