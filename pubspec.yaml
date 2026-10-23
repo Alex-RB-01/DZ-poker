@@ -1,0 +1,21 @@
+name: poker_app
+description: 蓝牙局域网德州扑克（安卓优先，含 AI 单机、锦标赛盲注）
+publish_to: "none"
+version: 0.1.0
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # 蓝牙/WiFi 直连（Android: Nearby Connections; iOS: MultipeerConnectivity）
+  flutter_nearby_connections: ^1.1.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
