@@ -250,35 +250,41 @@ class _TableArea extends StatelessWidget {
     final tableH = h * 0.86;
     final tableRim = BorderRadius.circular(tableH / 2);
 
-    // ---- 对手座位（自己画在底部信息条，不占桌环）----
+    // ---- 所有玩家（含自己）都坐在桌环上：自己固定在桌底，其余对手环绕上半圆 ----
+    final mySeat = controller.mySeat;
     final opponents = <int>[
       for (var s = 0; s < n; s++)
-        if (s != controller.mySeat) s
+        if (s != mySeat) s
     ];
     final m = opponents.length;
 
-    const seatH = 86.0;
-    final seatW = min(w * 0.24, 112.0);
+    // 玩家多时座位框按比例缩小，避免互相重叠 / 遮挡中央公牌
+    final seatScale = n <= 4 ? 1.0 : (n <= 6 ? 0.9 : (n <= 8 ? 0.8 : 0.7));
+    final seatH = 86.0 * seatScale;
+    final seatW = min(w * 0.24, 112.0) * seatScale;
 
     // 座位中心椭圆：略内缩，让座位框“骑”在桌沿上（参考图样式）
     final A = tableW / 2 - seatW * 0.30;
     final B = tableH / 2 - seatH * 0.30;
 
-    // 对手分布：避开底部（自己是底部），从左下 140° 经顶部 270° 到右下 40°
+    // 对手分布：避开底部（自己占底部），从左下 140° 经顶部 270° 到右下 40°
     List<double> angles;
     if (m == 1) {
-      angles = [270];
+      angles = [270.0 * pi / 180];
     } else {
       angles = [
         for (var k = 0; k < m; k++) (140 + k * 260 / (m - 1)) * pi / 180
       ];
     }
 
-    // 座位中心坐标
-    final centers = <Offset>[
-      for (final rad in angles)
-        Offset(w / 2 + A * cos(rad), h / 2 + B * sin(rad)),
-    ];
+    // 座位中心坐标：对手按 angles 分布，自己固定在底部 90°
+    final seatCenters = <int, Offset>{};
+    for (var k = 0; k < m; k++) {
+      seatCenters[opponents[k]] =
+          Offset(w / 2 + A * cos(angles[k]), h / 2 + B * sin(angles[k]));
+    }
+    seatCenters[mySeat] = Offset(w / 2 + A * cos(90.0 * pi / 180),
+        h / 2 + B * sin(90.0 * pi / 180));
 
     // ---- 中央公牌尺寸：在桌面内尽可能大，且不被两侧座位挡住 ----
     var cardW = min(min(w * 0.155, tableH * 0.30), 62.0);
@@ -287,7 +293,7 @@ class _TableArea extends StatelessWidget {
     // 水平：与公牌带发生竖向重叠的座位，让出水平空间
     final cardBandHalf = cardW * 1.4 / 2 + 12;
     var rowHalfMax = tableW / 2 - 14;
-    for (final c0 in centers) {
+    for (final c0 in seatCenters.values) {
       if ((c0.dy - h / 2).abs() < cardBandHalf + seatH / 2) {
         if (c0.dx < w / 2) {
           rowHalfMax = min(rowHalfMax, w / 2 - c0.dx - seatW / 2 - 8);
@@ -340,15 +346,21 @@ class _TableArea extends StatelessWidget {
             ],
           ),
         ),
-        // 对手座位
-        for (var k = 0; k < m; k++)
+        // 所有玩家座位（含自己，自己固定在桌底）
+        for (var s = 0; s < n; s++)
           Positioned(
-            left: (centers[k].dx - seatW / 2).clamp(2.0, w - seatW - 2).toDouble(),
-            top: (centers[k].dy - seatH / 2).clamp(2.0, h - seatH - 2).toDouble(),
+            left: (seatCenters[s]!.dx - seatW / 2)
+                .clamp(2.0, w - seatW - 2)
+                .toDouble(),
+            top: (seatCenters[s]!.dy - seatH / 2)
+                .clamp(2.0, h - seatH - 2)
+                .toDouble(),
             child: SeatView(
               controller: controller,
-              seat: opponents[k],
+              seat: s,
               width: seatW,
+              isMe: s == mySeat,
+              showHole: s != mySeat,
             ),
           ),
       ],
@@ -360,11 +372,15 @@ class SeatView extends StatelessWidget {
   final GameController controller;
   final int seat;
   final double width;
+  final bool isMe;
+  final bool showHole;
   const SeatView(
       {super.key,
       required this.controller,
       required this.seat,
-      required this.width});
+      required this.width,
+      this.isMe = false,
+      this.showHole = true});
 
   @override
   Widget build(BuildContext context) {
@@ -383,9 +399,9 @@ class SeatView extends StatelessWidget {
             ? Colors.white12
             : Colors.white24;
 
-    // 底牌：摊牌亮真牌；持牌未摊显示牌背；未持牌不显示
+    // 底牌：摊牌亮真牌；持牌未摊显示牌背；未持牌/自己（底牌在底部信息条）不显示
     final List<Widget> cardRow;
-    if (!p.hasCards) {
+    if (!p.hasCards || !showHole) {
       cardRow = [];
     } else if (showCards) {
       cardRow = [
@@ -424,17 +440,18 @@ class SeatView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(p.name,
+            Text(isMe ? '${p.name}（你）' : p.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 11, fontWeight: FontWeight.bold)),
+                style: TextStyle(
+                    fontSize: (width * 0.095).clamp(9.0, 12.0),
+                    fontWeight: FontWeight.bold)),
             const SizedBox(height: 2),
             Stack(
               clipBehavior: Clip.none,
               children: [
                 CircleAvatar(
-                  radius: 19,
+                  radius: (width * 0.17).clamp(13.0, 22.0),
                   backgroundColor: p.isAI ? Colors.teal : AppTheme.callBlue,
                   backgroundImage: (avatarB64 != null && avatarB64.isNotEmpty)
                       ? MemoryImage(base64Decode(avatarB64))
@@ -794,8 +811,10 @@ class _ActionBarState extends State<_ActionBar> {
                   label: AppTheme.money(_raiseValue.round()),
                   onChanged: (v) => setState(() => _raiseValue = v),
                 ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                Wrap(
+                  alignment: WrapAlignment.spaceEvenly,
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
                     for (final frac in [0.33, 0.5, 1.0])
                       OutlinedButton(
@@ -808,24 +827,34 @@ class _ActionBarState extends State<_ActionBar> {
                                 .toDouble();
                           });
                         },
-                        child: Text(frac == 1.0 ? '满池' : '${(frac * 100).round()}%池'),
+                        child: Text(
+                          frac == 1.0 ? '满池' : '${(frac * 100).round()}%池',
+                          style: const TextStyle(fontSize: 13),
+                        ),
                       ),
                     OutlinedButton(
                       onPressed: () => setState(
                           () => _raiseValue = legal.maxRaiseTo.toDouble()),
-                      child: const Text('全下额'),
-                    ),
-                    FilledButton(
-                      style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.raiseGreen),
-                      onPressed: () {
-                        setState(() => _raiseOpen = false);
-                        c.sendMyAction(PokerAction('raise',
-                            amount: _raiseValue.round()));
-                      },
-                      child: Text('加注到 ${_raiseValue.round()}'),
+                      child: const Text('全下额',
+                          style: TextStyle(fontSize: 13)),
                     ),
                   ],
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.raiseGreen,
+                        padding: const EdgeInsets.symmetric(vertical: 12)),
+                    onPressed: () {
+                      setState(() => _raiseOpen = false);
+                      c.sendMyAction(PokerAction('raise',
+                          amount: _raiseValue.round()));
+                    },
+                    child: Text('加注到 ${_raiseValue.round()}',
+                        style: const TextStyle(fontSize: 15)),
+                  ),
                 ),
               ],
             ),
