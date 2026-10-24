@@ -687,6 +687,7 @@ class GameState {
             'chips': p.chips,
             'isAI': p.isAI,
             'roundBet': p.roundBet,
+            'totalContributed': p.totalContributed,
             'folded': p.folded,
             'allIn': p.allIn,
             'out': p.out,
@@ -748,7 +749,8 @@ class GameState {
             chips: (p['chips'] as num).toInt(),
           );
           ps.roundBet = (p['roundBet'] as num).toInt();
-          ps.totalContributed = 0;
+          ps.totalContributed =
+              (p['totalContributed'] as num?)?.toInt() ?? 0;
           ps.folded = p['folded'] as bool;
           ps.allIn = p['allIn'] as bool;
           ps.out = p['out'] as bool;

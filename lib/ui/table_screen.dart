@@ -10,7 +10,100 @@ import 'package:flutter/services.dart';
 import '../engine/game.dart';
 import '../net/transport.dart';
 import '../state/controller.dart';
+import '../util/coin_sound.dart';
 import 'theme.dart';
+
+/// 牌桌布局计算结果（座位坐标、底池落点、公牌尺寸等），座位与金币动画共用同一坐标系。
+class TableLayout {
+  final double w, h, tableW, tableH, seatW, seatH, cardW;
+  final Map<int, Offset> seatCenters;
+  final Offset potTarget; // 金币落点：底池文字右侧，不遮挡数字
+  const TableLayout({
+    required this.w,
+    required this.h,
+    required this.tableW,
+    required this.tableH,
+    required this.seatW,
+    required this.seatH,
+    required this.cardW,
+    required this.seatCenters,
+    required this.potTarget,
+  });
+}
+
+/// 根据控制器状态与可用尺寸，算出牌桌布局（与 _TableArea 渲染、金币动画共用）。
+TableLayout computeTableLayout(GameController controller, Size size) {
+  final g = controller.g;
+  final w = size.width;
+  final h = size.height;
+  final n = g.players.length;
+  final tableW = w * 0.92;
+  final tableH = h * 0.86;
+  final mySeat = controller.mySeat;
+  final opponents = <int>[
+    for (var s = 0; s < n; s++)
+      if (s != mySeat) s
+  ];
+  final m = opponents.length;
+
+  // 玩家多时座位框按比例缩小，避免互相重叠 / 遮挡中央公牌
+  final seatScale = n <= 4 ? 1.0 : (n <= 6 ? 0.9 : (n <= 8 ? 0.8 : 0.7));
+  final seatH = 86.0 * seatScale;
+  final seatW = min(w * 0.24, 112.0) * seatScale;
+
+  // 座位中心椭圆：略内缩，让座位框“骑”在桌沿上
+  final A = tableW / 2 - seatW * 0.30;
+  final B = tableH / 2 - seatH * 0.30;
+
+  // 对手分布：避开底部（自己占底部），从左下 140° 经顶部 270° 到右下 40°
+  List<double> angles;
+  if (m == 1) {
+    angles = [270.0 * pi / 180];
+  } else {
+    angles = [
+      for (var k = 0; k < m; k++) (140 + k * 260 / (m - 1)) * pi / 180
+    ];
+  }
+
+  final seatCenters = <int, Offset>{};
+  for (var k = 0; k < m; k++) {
+    seatCenters[opponents[k]] =
+        Offset(w / 2 + A * cos(angles[k]), h / 2 + B * sin(angles[k]));
+  }
+  seatCenters[mySeat] = Offset(w / 2 + A * cos(90.0 * pi / 180),
+      h / 2 + B * sin(90.0 * pi / 180));
+
+  // 中央公牌尺寸：在桌面内尽可能大，且不被两侧座位挡住
+  var cardW = min(min(w * 0.155, tableH * 0.30), 62.0);
+  cardW = min(cardW, (tableH * 0.62 - 30) / 1.4);
+  final cardBandHalf = cardW * 1.4 / 2 + 12;
+  var rowHalfMax = tableW / 2 - 14;
+  for (final c0 in seatCenters.values) {
+    if ((c0.dy - h / 2).abs() < cardBandHalf + seatH / 2) {
+      if (c0.dx < w / 2) {
+        rowHalfMax = min(rowHalfMax, w / 2 - c0.dx - seatW / 2 - 8);
+      } else {
+        rowHalfMax = min(rowHalfMax, c0.dx - seatW / 2 - w / 2 - 8);
+      }
+    }
+  }
+  cardW = max(30.0, min(cardW, (rowHalfMax * 2 - 16) / 5));
+
+  // 金币落点：底池文字右侧一点（不遮挡数字），靠边时收紧
+  final potTarget = Offset(min(w / 2 + 72, w - 38), h / 2 - 26);
+
+  return TableLayout(
+    w: w,
+    h: h,
+    tableW: tableW,
+    tableH: tableH,
+    seatW: seatW,
+    seatH: seatH,
+    cardW: cardW,
+    seatCenters: seatCenters,
+    potTarget: potTarget,
+  );
+}
 
 class GameScreen extends StatefulWidget {
   final GameController controller;
@@ -20,7 +113,35 @@ class GameScreen extends StatefulWidget {
   State<GameScreen> createState() => _GameScreenState();
 }
 
+/// 金币飞行特效控制器：牌局状态变化时由 _GameScreenState 触发，CoinFlyLayer 渲染。
+class CoinFxController extends ChangeNotifier {
+  final List<CoinFlight> _active = [];
+  List<CoinFlight> get active => List.unmodifiable(_active);
+  void spawn(Offset from, Offset to) {
+    _active.add(CoinFlight(from: from, to: to));
+    notifyListeners();
+  }
+
+  void remove(CoinFlight f) {
+    _active.remove(f);
+    notifyListeners();
+  }
+}
+
+class CoinFlight {
+  final Offset from;
+  final Offset to;
+  CoinFlight({required this.from, required this.to});
+}
+
 class _GameScreenState extends State<GameScreen> {
+  final CoinFxController _coinFx = CoinFxController();
+  TableLayout? _cachedLayout;
+  int _prevPot = 0;
+  Map<int, int> _prevContrib = {};
+  bool _prevHandOver = false;
+  int _prevHand = 0;
+
   @override
   void initState() {
     super.initState();
@@ -28,10 +149,71 @@ class _GameScreenState extends State<GameScreen> {
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
     ]);
+    widget.controller.addListener(_onNotify);
+    _syncBaseline(widget.controller.g);
+  }
+
+  void _syncBaseline(GameState g) {
+    _prevPot = g.potTotal;
+    _prevContrib = {
+      for (var s = 0; s < g.players.length; s++) s: g.players[s].totalContributed
+    };
+    _prevHandOver = g.handOver;
+    _prevHand = g.handNumber;
+  }
+
+  /// 监听牌局变化：检测「有人下注/跟注（底池增加）」与「赢池（handOver 且有结算）」，
+  /// 触发金币从座位→底池 / 底池→赢家 的飞行动画，并播放金币音效。
+  void _onNotify() {
+    final c = widget.controller;
+    final g = c.g;
+    final layout = _cachedLayout;
+    if (layout == null) {
+      _syncBaseline(g);
+      return;
+    }
+    // 新手牌：totalContributed 清零，避免误判，直接重置基线
+    if (g.handNumber != _prevHand) {
+      _syncBaseline(g);
+      return;
+    }
+
+    var played = false;
+    final pot = g.potTotal;
+    if (pot > _prevPot) {
+      for (var s = 0; s < g.players.length; s++) {
+        final cur = g.players[s].totalContributed;
+        final prev = _prevContrib[s] ?? 0;
+        if (cur > prev) {
+          final center = layout.seatCenters[s];
+          if (center != null) {
+            _coinFx.spawn(center, layout.potTarget);
+            played = true;
+          }
+        }
+      }
+    }
+    if (g.handOver && !_prevHandOver && g.lastResult != null) {
+      for (final seat in g.lastResult!.seatWin.keys) {
+        final center = layout.seatCenters[seat];
+        if (center != null) {
+          _coinFx.spawn(layout.potTarget, center);
+          played = true;
+        }
+      }
+    }
+    if (played) CoinSound.play();
+
+    _prevPot = pot;
+    _prevContrib = {
+      for (var s = 0; s < g.players.length; s++) s: g.players[s].totalContributed
+    };
+    _prevHandOver = g.handOver;
   }
 
   @override
   void dispose() {
+    widget.controller.removeListener(_onNotify);
     // 关闭牌桌时一并释放控制器（停掉 AI 计时器 / 网络会话）
     widget.controller.dispose();
     // 恢复自动旋转
@@ -52,7 +234,11 @@ class _GameScreenState extends State<GameScreen> {
         body: SafeArea(
           child: AnimatedBuilder(
             animation: widget.controller,
-            builder: (context, _) => _Body(controller: widget.controller),
+            builder: (context, _) => _Body(
+              controller: widget.controller,
+              coinFx: _coinFx,
+              onLayout: (l) => _cachedLayout = l,
+            ),
           ),
         ),
       ),
@@ -62,7 +248,10 @@ class _GameScreenState extends State<GameScreen> {
 
 class _Body extends StatelessWidget {
   final GameController controller;
-  const _Body({required this.controller});
+  final CoinFxController coinFx;
+  final void Function(TableLayout) onLayout;
+  const _Body(
+      {required this.controller, required this.coinFx, required this.onLayout});
 
   @override
   Widget build(BuildContext context) {
@@ -92,8 +281,12 @@ class _Body extends StatelessWidget {
         _TopBar(controller: c),
         Expanded(
           child: LayoutBuilder(
-            builder: (context, box) =>
-                _TableArea(controller: c, size: box.biggest),
+            builder: (context, box) {
+              final layout = computeTableLayout(c, box.biggest);
+              onLayout(layout);
+              return _TableArea(
+                  controller: c, layout: layout, coinFx: coinFx);
+            },
           ),
         ),
         _HeroStrip(controller: c),
@@ -234,75 +427,28 @@ class _TopBar extends StatelessWidget {
 
 class _TableArea extends StatelessWidget {
   final GameController controller;
-  final Size size;
-  const _TableArea({required this.controller, required this.size});
+  final TableLayout layout;
+  final CoinFxController coinFx;
+  const _TableArea(
+      {required this.controller,
+      required this.layout,
+      required this.coinFx});
 
   @override
   Widget build(BuildContext context) {
     final g = controller.g;
-    final w = size.width;
-    final h = size.height;
     final n = g.players.length;
     if (n == 0) return const SizedBox.shrink();
-
-    // ---- 桌面椭圆：占满区域，留少量边距 ----
-    final tableW = w * 0.92;
-    final tableH = h * 0.86;
-    final tableRim = BorderRadius.circular(tableH / 2);
-
-    // ---- 所有玩家（含自己）都坐在桌环上：自己固定在桌底，其余对手环绕上半圆 ----
+    final w = layout.w;
+    final h = layout.h;
+    final tableW = layout.tableW;
+    final tableH = layout.tableH;
+    final seatW = layout.seatW;
+    final seatH = layout.seatH;
+    final cardW = layout.cardW;
     final mySeat = controller.mySeat;
-    final opponents = <int>[
-      for (var s = 0; s < n; s++)
-        if (s != mySeat) s
-    ];
-    final m = opponents.length;
 
-    // 玩家多时座位框按比例缩小，避免互相重叠 / 遮挡中央公牌
-    final seatScale = n <= 4 ? 1.0 : (n <= 6 ? 0.9 : (n <= 8 ? 0.8 : 0.7));
-    final seatH = 86.0 * seatScale;
-    final seatW = min(w * 0.24, 112.0) * seatScale;
-
-    // 座位中心椭圆：略内缩，让座位框“骑”在桌沿上（参考图样式）
-    final A = tableW / 2 - seatW * 0.30;
-    final B = tableH / 2 - seatH * 0.30;
-
-    // 对手分布：避开底部（自己占底部），从左下 140° 经顶部 270° 到右下 40°
-    List<double> angles;
-    if (m == 1) {
-      angles = [270.0 * pi / 180];
-    } else {
-      angles = [
-        for (var k = 0; k < m; k++) (140 + k * 260 / (m - 1)) * pi / 180
-      ];
-    }
-
-    // 座位中心坐标：对手按 angles 分布，自己固定在底部 90°
-    final seatCenters = <int, Offset>{};
-    for (var k = 0; k < m; k++) {
-      seatCenters[opponents[k]] =
-          Offset(w / 2 + A * cos(angles[k]), h / 2 + B * sin(angles[k]));
-    }
-    seatCenters[mySeat] = Offset(w / 2 + A * cos(90.0 * pi / 180),
-        h / 2 + B * sin(90.0 * pi / 180));
-
-    // ---- 中央公牌尺寸：在桌面内尽可能大，且不被两侧座位挡住 ----
-    var cardW = min(min(w * 0.155, tableH * 0.30), 62.0);
-    // 垂直空间：底池文字 + 公牌
-    cardW = min(cardW, (tableH * 0.62 - 30) / 1.4);
-    // 水平：与公牌带发生竖向重叠的座位，让出水平空间
-    final cardBandHalf = cardW * 1.4 / 2 + 12;
-    var rowHalfMax = tableW / 2 - 14;
-    for (final c0 in seatCenters.values) {
-      if ((c0.dy - h / 2).abs() < cardBandHalf + seatH / 2) {
-        if (c0.dx < w / 2) {
-          rowHalfMax = min(rowHalfMax, w / 2 - c0.dx - seatW / 2 - 8);
-        } else {
-          rowHalfMax = min(rowHalfMax, c0.dx - seatW / 2 - w / 2 - 8);
-        }
-      }
-    }
-    cardW = max(30.0, min(cardW, (rowHalfMax * 2 - 16) / 5));
+    final tableRim = BorderRadius.circular(tableH / 2);
 
     final boardRow = Row(
       mainAxisSize: MainAxisSize.min,
@@ -349,10 +495,10 @@ class _TableArea extends StatelessWidget {
         // 所有玩家座位（含自己，自己固定在桌底）
         for (var s = 0; s < n; s++)
           Positioned(
-            left: (seatCenters[s]!.dx - seatW / 2)
+            left: (layout.seatCenters[s]!.dx - seatW / 2)
                 .clamp(2.0, w - seatW - 2)
                 .toDouble(),
-            top: (seatCenters[s]!.dy - seatH / 2)
+            top: (layout.seatCenters[s]!.dy - seatH / 2)
                 .clamp(2.0, h - seatH - 2)
                 .toDouble(),
             child: SeatView(
@@ -363,9 +509,139 @@ class _TableArea extends StatelessWidget {
               showHole: s != mySeat,
             ),
           ),
+        // 金币飞行动画图层（座位↔底池）
+        CoinFlyLayer(fx: coinFx),
       ],
     );
   }
+}
+
+// ---------------- 金币飞行动画 ----------------
+
+/// 覆盖在牌桌上的金币动画图层：监听 CoinFxController，为每个飞行任务渲染一枚金币堆。
+class CoinFlyLayer extends StatelessWidget {
+  final CoinFxController fx;
+  const CoinFlyLayer({required this.fx});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: fx,
+      builder: (_, __) => Stack(
+        children: [
+          for (final f in fx.active)
+            CoinFlyWidget(
+              key: ValueKey(f),
+              from: f.from,
+              to: f.to,
+              onDone: () => fx.remove(f),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class CoinFlyWidget extends StatefulWidget {
+  final Offset from;
+  final Offset to;
+  final VoidCallback onDone;
+  const CoinFlyWidget(
+      {super.key, required this.from, required this.to, required this.onDone});
+
+  @override
+  State<CoinFlyWidget> createState() => _CoinFlyWidgetState();
+}
+
+class _CoinFlyWidgetState extends State<CoinFlyWidget>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ac;
+  late final Animation<Offset> _pos;
+  late final Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _ac = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 620));
+    final curve =
+        CurvedAnimation(parent: _ac, curve: Curves.easeInOutCubic);
+    final from = widget.from;
+    final to = widget.to;
+    // 抛物线弧线：中点上抬一小段，像被抛过去的金币
+    final mid = Offset((from.dx + to.dx) / 2, min(from.dy, to.dy) - 36);
+    _pos = TweenSequence<Offset>([
+      TweenSequenceItem(tween: Tween(begin: from, end: mid), weight: 0.5),
+      TweenSequenceItem(tween: Tween(begin: mid, end: to), weight: 0.5),
+    ]).animate(curve);
+    _scale = Tween(begin: 1.0, end: 0.72).animate(curve);
+    _ac.addStatusListener((s) {
+      if (s == AnimationStatus.completed) widget.onDone();
+    });
+    _ac.forward();
+  }
+
+  @override
+  void dispose() {
+    _ac.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = _pos.value;
+    return Positioned(
+      left: p.dx - 13,
+      top: p.dy - 13,
+      child: Transform.scale(
+        scale: _scale.value,
+        child: const _CoinPile(),
+      ),
+    );
+  }
+}
+
+/// 一小堆金币（3 枚叠放的金色圆片）
+class _CoinPile extends StatelessWidget {
+  const _CoinPile();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 26,
+      height: 26,
+      child: Stack(
+        children: [
+          _coin(14),
+          _coin(7),
+          _coin(0),
+        ],
+      ),
+    );
+  }
+
+  Widget _coin(double top) => Positioned(
+        top: top,
+        left: 0,
+        child: Container(
+          width: 22,
+          height: 22,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: const RadialGradient(
+              colors: [Color(0xFFFFF1A8), Color(0xFFE0A82E)],
+            ),
+            border: Border.all(color: Color(0xFFB8860B), width: 1.5),
+          ),
+          child: const Center(
+            child: Text('¥',
+                style: TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF8A5A00),
+                    fontWeight: FontWeight.bold)),
+          ),
+        ),
+      );
 }
 
 class SeatView extends StatelessWidget {

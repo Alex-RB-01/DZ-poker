@@ -72,9 +72,12 @@ class LanTransport {
   Stream<HostBeacon> get beacons => _beacons.stream;
 
   Future<void> init() async {
-    // UDP 组播发现（双方都要监听）
+    // UDP 发现（双方都要监听）。组播常被普通 Wi-Fi 屏蔽，因此额外用广播兜底。
     try {
       _udp = await RawDatagramSocket.bind(InternetAddress.anyIPv4, udpPort);
+      try {
+        _udp!.broadcastEnabled = true; // 允许发送 255.255.255.255 广播信标
+      } catch (_) {}
       try {
         // joinMulticast 返回 void（非 Future），不可 await
         _udp!.joinMulticast(InternetAddress(multicastGroup));
@@ -131,9 +134,25 @@ class LanTransport {
     final body = jsonEncode(
         {'t': 'beacon', 'name': deviceName, 'port': _actualPort, 'addr': ip});
     final data = utf8.encode(body);
+    // 组播（可能被 Wi-Fi 屏蔽）+ 受限广播 255.255.255.255（兜底，覆盖同网段）+ 子网定向广播（最稳）
+    const targets = <String>[multicastGroup, '255.255.255.255'];
     try {
-      _udp!.send(data, InternetAddress(multicastGroup), udpPort);
+      final subnet = _subnetBroadcast(ip);
+      if (subnet != null) targets.add(subnet);
     } catch (_) {}
+    for (final t in targets) {
+      try {
+        _udp!.send(data, InternetAddress(t), udpPort);
+      } catch (_) {}
+    }
+  }
+
+  /// 由本机 IP 推导同网段定向广播地址（如 192.168.1.5 -> 192.168.1.255）；失败返回 null
+  static String? _subnetBroadcast(String ip) {
+    final parts = ip.split('.');
+    if (parts.length != 4) return null;
+    if (parts.any((p) => int.tryParse(p) == null)) return null;
+    return '${parts[0]}.${parts[1]}.${parts[2]}.255';
   }
 
   void _onAccept(Socket socket) {

@@ -42,6 +42,31 @@ jobs:
       - name: 移除 flutter create 生成的默认测试
         run: rm -f test/widget_test.dart
 
+      # 确保金币音效资源被打包：flutter create 可能重写 pubspec 的 flutter 段，
+      # 用脚本兜底写入 assets 条目（已存在则跳过），否则 coin.wav 不会被打包、音效静默失效。
+      - name: 确保 assets/coin.wav 已注册
+        run: |
+          python3 - <<'PY'
+          import re
+          p = 'pubspec.yaml'
+          s = open(p, encoding='utf-8').read()
+          if "assets/coin.wav" in s:
+              print('assets 已存在，跳过')
+          else:
+              # 在 flutter: 段下插入 assets: - assets/coin.wav
+              if 'flutter:' not in s:
+                  s = s.rstrip() + "\nflutter:\n  uses-material-design: true\n"
+              block = "  assets:\n    - assets/coin.wav\n"
+              # 插到 uses-material-design 之后
+              if 'uses-material-design' in s:
+                  s = s.replace('uses-material-design: true',
+                                'uses-material-design: true\n' + block, 1)
+              else:
+                  s = s.replace('flutter:', 'flutter:\n' + block, 1)
+              open(p, 'w', encoding='utf-8').write(s)
+              print('已写入 assets 条目')
+          PY
+
       # 蓝牙 / 邻近发现所需权限（flutter_nearby_connections 依赖）
       - name: 注入蓝牙/邻近权限到 AndroidManifest
         run: |
