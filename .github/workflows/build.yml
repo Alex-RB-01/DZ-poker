@@ -37,6 +37,11 @@ jobs:
       - name: 生成 Android 平台文件
         run: flutter create --platforms=android .
 
+      # flutter create 会生成默认的 test/widget_test.dart（Flutter 模板的 counter 冒烟测试），
+      # 本项目没有 counter，该测试必然失败；删掉它，只保留我们自己的引擎测试与联机链路测试
+      - name: 移除 flutter create 生成的默认测试
+        run: rm -f test/widget_test.dart
+
       # 蓝牙 / 邻近发现所需权限（flutter_nearby_connections 依赖）
       - name: 注入蓝牙/邻近权限到 AndroidManifest
         run: |

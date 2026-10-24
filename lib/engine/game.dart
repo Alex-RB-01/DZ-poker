@@ -716,9 +716,16 @@ class GameState {
       'result': lastResult == null
           ? null
           : {
-              'seatWin': lastResult!.seatWin,
-              'reveal': lastResult!.reveal,
-              'handNames': lastResult!.handNames,
+              // JSON 要求 Map 的 key 必须是 String，故把 int 座位号转成字符串（fromMap 用 int.parse 还原）
+              'seatWin': {
+                for (final e in lastResult!.seatWin.entries) '${e.key}': e.value
+              },
+              'reveal': {
+                for (final e in lastResult!.reveal.entries) '${e.key}': e.value
+              },
+              'handNames': {
+                for (final e in lastResult!.handNames.entries) '${e.key}': e.value
+              },
               'pots': [
                 for (final pot in lastResult!.pots)
                   {'amount': pot.amount, 'seats': pot.seats}

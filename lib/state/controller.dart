@@ -77,7 +77,7 @@ class GameController extends ChangeNotifier {
     c.hostSession = HostSession(
       roomName: myName,
       onMessage: c._onHostMessage,
-      onChanged: c.notifyListeners,
+      onChanged: c._safeNotify,
       onPeerDisconnected: c._onPeerDisconnected,
     );
     c.hostSession!.start();
@@ -149,7 +149,7 @@ class GameController extends ChangeNotifier {
         } else {
           _pendingAvatars.remove(peerId);
         }
-        notifyListeners();
+        _safeNotify();
       case 'next':
         nextHand();
       case 'action':
@@ -180,7 +180,7 @@ class GameController extends ChangeNotifier {
     switch (msg['t']) {
       case 'seat':
         mySeat = (msg['seat'] as num).toInt();
-        notifyListeners();
+        _safeNotify();
       case 'avatars':
         final bySeat = (msg['bySeat'] as Map? ?? {});
         avatarsBySeat
@@ -189,10 +189,10 @@ class GameController extends ChangeNotifier {
             for (final e in bySeat.entries)
               int.parse(e.key.toString()): e.value.toString(),
           });
-        notifyListeners();
+        _safeNotify();
       case 'snap':
         g = GameState.fromMap((msg['state'] as Map).cast<String, dynamic>());
-        notifyListeners();
+        _safeNotify();
     }
   }
 
@@ -238,7 +238,7 @@ class GameController extends ChangeNotifier {
   }
 
   void _afterChange() {
-    notifyListeners();
+    _safeNotify();
     if (mode == GameMode.host) _broadcastSnapshots();
     _scheduleAI();
   }
@@ -292,8 +292,11 @@ class GameController extends ChangeNotifier {
     });
   }
 
+  bool _disposed = false;
+
   @override
   void dispose() {
+    _disposed = true;
     _aiTicket++;
     _blindTimer?.cancel();
     try {
@@ -301,6 +304,11 @@ class GameController extends ChangeNotifier {
       if (mode == GameMode.client) clientSession?.stop();
     } catch (_) {}
     super.dispose();
+  }
+
+  /// 安全的 notify：控制器已 dispose 后（如 session 异步回调延迟触发）不再通知，避免抛 assert
+  void _safeNotify() {
+    if (!_disposed) notifyListeners();
   }
 }
 
