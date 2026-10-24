@@ -60,6 +60,7 @@ class ClientSession {
   final Map<String, HostBeacon> hosts = {};
   String? hostPeerId;
   String? _myName;
+  String? _myAvatar;
   bool _helloSent = false;
 
   ClientSession(
@@ -76,7 +77,8 @@ class ClientSession {
         hostPeerId ??= p.id;
         if (!_helloSent && _myName != null) {
           _helloSent = true;
-          transport.send(p.id, jsonEncode({'t': 'hello', 'name': _myName}));
+          transport.send(p.id,
+              jsonEncode({'t': 'hello', 'name': _myName, 'avatar': _myAvatar}));
         }
       } else {
         if (hostPeerId == p.id) hostPeerId = null;
@@ -97,8 +99,9 @@ class ClientSession {
   Future<void> start() => transport.init();
 
   /// 加入某房间：建立 TCP 连接（连接成功后由 peers 监听自动发送 hello）
-  Future<void> join(String addr, int port, String myName) async {
+  Future<void> join(String addr, int port, String myName, {String? avatarB64}) async {
     _myName = myName;
+    _myAvatar = avatarB64;
     await transport.connectToHost(addr, port);
   }
 

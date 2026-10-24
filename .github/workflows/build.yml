@@ -68,8 +68,9 @@ jobs:
       - name: 静态分析（仅提示，不阻断打包）
         run: flutter analyze || true
 
-      - name: 运行引擎单元测试（仅提示）
-        run: flutter test || true
+      # 联机全链路测试必须通过（客户端下注→房主执行→快照回传），失败则不出包
+      - name: 运行测试（联机链路 + 引擎，阻断式）
+        run: flutter test
 
       - name: 构建 Release APK
         run: flutter build apk --release

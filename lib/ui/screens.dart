@@ -1,14 +1,63 @@
 /// 首页 / 大厅（配置） / 加入房间 三个界面
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../engine/game.dart';
 import '../net/session.dart';
 import '../net/transport.dart';
 import '../state/controller.dart';
+import '../util/avatar.dart';
 import 'table_screen.dart';
 import 'theme.dart';
+
+/// 头像选择圈：点击从相册选图，自动持久化并回调 base64
+class AvatarPickerCircle extends StatefulWidget {
+  final double radius;
+  final void Function(String? b64) onPicked;
+  const AvatarPickerCircle(
+      {super.key, this.radius = 28, required this.onPicked});
+
+  @override
+  State<AvatarPickerCircle> createState() => _AvatarPickerCircleState();
+}
+
+class _AvatarPickerCircleState extends State<AvatarPickerCircle> {
+  String? _path;
+
+  @override
+  void initState() {
+    super.initState();
+    AvatarStore.loadPath().then((p) {
+      if (mounted && p != null) setState(() => _path = p);
+    });
+  }
+
+  Future<void> _pick() async {
+    final p = await AvatarStore.pickAndSave();
+    if (p == null) return; // 用户取消
+    setState(() => _path = p);
+    widget.onPicked(await AvatarStore.toBase64(p));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _pick,
+      child: CircleAvatar(
+        radius: widget.radius,
+        backgroundColor: AppTheme.callBlue.withOpacity(0.35),
+        backgroundImage: _path != null ? FileImage(File(_path!)) : null,
+        child: _path == null
+            ? Icon(Icons.add_a_photo,
+                size: widget.radius * 0.8, color: Colors.white70)
+            : null,
+      ),
+    );
+  }
+}
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -101,6 +150,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
   String _advanceMode = 'hands'; // hands | minutes
   int _aiCount = 3;
   List<BlindLevel> _levels = GameConfig.defaultLevels();
+  String? _avatarB64;
 
   @override
   Widget build(BuildContext context) {
@@ -110,11 +160,22 @@ class _LobbyScreenState extends State<LobbyScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          TextField(
-            controller: _nameCtrl,
-            decoration: const InputDecoration(
-                labelText: '我的昵称', border: OutlineInputBorder()),
+          Row(
+            children: [
+              AvatarPickerCircle(
+                  onPicked: (b64) => _avatarB64 = b64),
+              const SizedBox(width: 16),
+              Expanded(
+                child: TextField(
+                  controller: _nameCtrl,
+                  decoration: const InputDecoration(
+                      labelText: '我的昵称', border: OutlineInputBorder()),
+                ),
+              ),
+            ],
           ),
+          const Text('点头像可从相册选择照片作为头像',
+              style: TextStyle(fontSize: 11, color: Colors.white38)),
           const SizedBox(height: 16),
           _sectionTitle('初始筹码'),
           Wrap(
@@ -252,10 +313,13 @@ class _LobbyScreenState extends State<LobbyScreen> {
     if (widget.local) {
       final c = GameController.local(
           myName: name, aiCount: _aiCount, config: config);
+      c.myAvatarB64 = _avatarB64;
+      if (_avatarB64 != null) c.avatarsBySeat[0] = _avatarB64!;
       Navigator.pushReplacement(context,
           MaterialPageRoute(builder: (_) => GameScreen(controller: c)));
     } else {
       final c = GameController.host(myName: name, config: config);
+      c.myAvatarB64 = _avatarB64;
       Navigator.pushReplacement(context,
           MaterialPageRoute(builder: (_) => GameScreen(controller: c)));
     }
@@ -277,6 +341,7 @@ class _JoinScreenState extends State<JoinScreen> {
   ClientSession? _session;
   bool _started = false;
   bool _connecting = false;
+  String? _avatarB64;
   GameController? _controller;
 
   @override
@@ -307,6 +372,7 @@ class _JoinScreenState extends State<JoinScreen> {
     }
     if (msg['t'] == 'seat') {
       final c = GameController.client(myName: _name(), session: _session!);
+      c.myAvatarB64 = _avatarB64;
       c.onClientMessage(msg);
       _controller = c;
       if (!mounted) return;
@@ -319,7 +385,8 @@ class _JoinScreenState extends State<JoinScreen> {
     if (_connecting) return;
     setState(() => _connecting = true);
     try {
-      await _session!.join(b.addr, b.port, _name());
+      await _session!
+          .join(b.addr, b.port, _name(), avatarB64: _avatarB64);
     } catch (_) {
       if (mounted) {
         setState(() => _connecting = false);
@@ -336,7 +403,8 @@ class _JoinScreenState extends State<JoinScreen> {
     if (ip.isEmpty || _connecting) return;
     setState(() => _connecting = true);
     try {
-      await _session!.join(ip, LanTransport.tcpPort, _name());
+      await _session!
+          .join(ip, LanTransport.tcpPort, _name(), avatarB64: _avatarB64);
     } catch (_) {
       if (mounted) {
         setState(() => _connecting = false);
@@ -364,10 +432,18 @@ class _JoinScreenState extends State<JoinScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.all(16),
-            child: TextField(
-              controller: _nameCtrl,
-              decoration: const InputDecoration(
-                  labelText: '我的昵称', border: OutlineInputBorder()),
+            child: Row(
+              children: [
+                AvatarPickerCircle(onPicked: (b64) => _avatarB64 = b64),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: TextField(
+                    controller: _nameCtrl,
+                    decoration: const InputDecoration(
+                        labelText: '我的昵称', border: OutlineInputBorder()),
+                  ),
+                ),
+              ],
             ),
           ),
           Padding(

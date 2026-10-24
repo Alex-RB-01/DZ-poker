@@ -24,6 +24,14 @@ class GameController extends ChangeNotifier {
   HostSession? hostSession;
   ClientSession? clientSession;
 
+  /// 头像（base64 jpeg）：座位号 -> 头像；本机头像
+  final Map<int, String> avatarsBySeat = {};
+  String? myAvatarB64;
+
+  /// 主机模式：等待中客人的头像 peerId -> base64
+  final Map<String, String> _pendingAvatars = {};
+  Map<String, String> get pendingAvatars => _pendingAvatars;
+
   // 主机模式：peerId -> 座位 / 座位 -> peerId
   final Map<String, int> _seatByPeer = {};
   Map<int, String> get peerBySeat =>
@@ -91,11 +99,13 @@ class GameController extends ChangeNotifier {
     final hs = hostSession;
     if (hs == null) return;
     final roster = <PlayerSeed>[PlayerSeed(myName)];
+    avatarsBySeat[0] = myAvatarB64 ?? '';
     var seat = 1;
     for (final entry in hs.pendingClients.entries) {
       if (roster.length >= 10) break;
       roster.add(PlayerSeed(entry.value));
       _seatByPeer[entry.key] = seat;
+      avatarsBySeat[seat] = _pendingAvatars[entry.key] ?? '';
       seat++;
     }
     var ai = 1;
@@ -103,9 +113,15 @@ class GameController extends ChangeNotifier {
       roster.add(PlayerSeed('AI $ai', isAI: true));
       ai++;
     }
-    // 通知各客人座位号
+    // 通知各客人座位号 + 全桌头像表
     _seatByPeer.forEach((peerId, s) {
       hs.sendTo(peerId, {'t': 'seat', 'seat': s});
+      hs.sendTo(peerId, {
+        't': 'avatars',
+        'bySeat': {
+          for (final e in avatarsBySeat.entries) if (e.value.isNotEmpty) '${e.key}': e.value,
+        },
+      });
     });
     g.newGame(roster);
     g.startHand();
@@ -114,6 +130,7 @@ class GameController extends ChangeNotifier {
   }
 
   void _onPeerDisconnected(String peerId) {
+    _pendingAvatars.remove(peerId);
     final seat = _seatByPeer.remove(peerId);
     if (seat != null && !g.gameOver && !g.handOver) {
       g.forceFold(seat);
@@ -126,6 +143,12 @@ class GameController extends ChangeNotifier {
       case 'hello':
         hostSession?.pendingClients[peerId] =
             (msg['name'] ?? '玩家').toString();
+        final av = msg['avatar'];
+        if (av is String && av.isNotEmpty) {
+          _pendingAvatars[peerId] = av;
+        } else {
+          _pendingAvatars.remove(peerId);
+        }
         notifyListeners();
       case 'next':
         nextHand();
@@ -157,6 +180,15 @@ class GameController extends ChangeNotifier {
     switch (msg['t']) {
       case 'seat':
         mySeat = (msg['seat'] as num).toInt();
+        notifyListeners();
+      case 'avatars':
+        final bySeat = (msg['bySeat'] as Map? ?? {});
+        avatarsBySeat
+          ..clear()
+          ..addAll({
+            for (final e in bySeat.entries)
+              int.parse(e.key.toString()): e.value.toString(),
+          });
         notifyListeners();
       case 'snap':
         g = GameState.fromMap((msg['state'] as Map).cast<String, dynamic>());

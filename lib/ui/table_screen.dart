@@ -1,6 +1,7 @@
-/// 牌桌对局界面：环形座位牌桌 + 操作栏 + 日志 + 结算/淘汰覆盖层
+/// 牌桌对局界面（竖屏）：椭圆牌桌 + 玩家围桌（照片头像）+ 中央公牌 + 底部手牌/操作栏
 library;
 
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart' hide Card;
@@ -23,10 +24,9 @@ class _GameScreenState extends State<GameScreen> {
   @override
   void initState() {
     super.initState();
-    // 牌桌专横屏：把完整桌面与 10 人座位都摊开
+    // 牌桌固定竖屏（参考经典德州手游布局）
     SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
+      DeviceOrientation.portraitUp,
     ]);
   }
 
@@ -91,7 +91,6 @@ class _Body extends StatelessWidget {
       children: [
         _TopBar(controller: c),
         Expanded(
-          flex: 6,
           child: LayoutBuilder(
             builder: (context, box) =>
                 _TableArea(controller: c, size: box.biggest),
@@ -121,24 +120,26 @@ class _TopBar extends StatelessWidget {
       Street.river => '河牌',
     };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
       color: AppTheme.panel,
       child: Row(
         children: [
           Text('第 ${g.handNumber} 手',
-              style: const TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(width: 12),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+          const SizedBox(width: 10),
           Text('盲注 ${g.blinds.sb}/${g.blinds.bb} (L${g.level + 1})',
-              style: const TextStyle(color: AppTheme.gold)),
-          const SizedBox(width: 12),
-          Text(streetName, style: const TextStyle(color: Colors.white54)),
+              style: const TextStyle(color: AppTheme.gold, fontSize: 13)),
+          const SizedBox(width: 10),
+          Text(streetName, style: const TextStyle(color: Colors.white54, fontSize: 13)),
           const Spacer(),
           IconButton(
+            visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.schedule, size: 20),
             tooltip: '盲注级别表',
             onPressed: () => _showBlindSheet(context, controller),
           ),
           IconButton(
+            visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.exit_to_app, size: 20),
             tooltip: '退出',
             onPressed: () => _confirmExit(context),
@@ -229,7 +230,7 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-// ---------------- 牌桌区域 ----------------
+// ---------------- 牌桌区域（竖屏） ----------------
 
 class _TableArea extends StatelessWidget {
   final GameController controller;
@@ -244,98 +245,114 @@ class _TableArea extends StatelessWidget {
     final n = g.players.length;
     if (n == 0) return const SizedBox.shrink();
 
-    // 座位顺序：自己(或观战时座位0)在底部，顺时针排布
-    final ordered = <int>[
-      for (var i = 0; i < n; i++) (controller.mySeat + i) % n
+    // ---- 桌面椭圆：占满区域，留少量边距 ----
+    final tableW = w * 0.92;
+    final tableH = h * 0.86;
+    final tableRim = BorderRadius.circular(tableH / 2);
+
+    // ---- 对手座位（自己画在底部信息条，不占桌环）----
+    final opponents = <int>[
+      for (var s = 0; s < n; s++)
+        if (s != controller.mySeat) s
     ];
-    final angles = <double>[
-      for (var d = 0; d < n; d++) (90 + 360 * d / n) * pi / 180
-    ];
+    final m = opponents.length;
 
-    // 座位盒：紧凑但信息完整（昵称/筹码/状态/底牌），不与中央桌面重叠
-    const seatH = 76.0;
-    var seatW = min(w * 0.22, 150.0);
+    const seatH = 86.0;
+    final seatW = min(w * 0.24, 112.0);
 
-    // 座位中心所在的椭圆（贴边排布）
-    final a = w / 2 - seatW / 2 - 4.0;
+    // 座位中心椭圆：略内缩，让座位框“骑”在桌沿上（参考图样式）
+    final A = tableW / 2 - seatW * 0.30;
+    final B = tableH / 2 - seatH * 0.30;
 
-    // 计算相邻座位最小水平间距，防止座位互相遮挡
-    var minHGap = double.infinity;
-    for (var i = 0; i < n; i++) {
-      final dcos = (cos(angles[i]) - cos(angles[(i + 1) % n])).abs();
-      final gap = a * dcos;
-      if (gap < minHGap) minHGap = gap;
+    // 对手分布：避开底部（自己是底部），从左下 140° 经顶部 270° 到右下 40°
+    List<double> angles;
+    if (m == 1) {
+      angles = [270];
+    } else {
+      angles = [
+        for (var k = 0; k < m; k++) (140 + k * 260 / (m - 1)) * pi / 180
+      ];
     }
-    seatW = max(60.0, min(seatW, minHGap - 6));
 
-    // 用夹紧后的 seatW 重新计算贴边椭圆
-    final a2 = w / 2 - seatW / 2 - 4.0;
-    final b2 = h / 2 - seatH / 2 - 4.0;
+    // 座位中心坐标
+    final centers = <Offset>[
+      for (final rad in angles)
+        Offset(w / 2 + A * cos(rad), h / 2 + B * sin(rad)),
+    ];
 
-    // 中央桌面椭圆：严格位于座位环内侧，留 10px 间隙，绝不遮挡中央公共牌
-    final tableA = max(40.0, a2 - seatW / 2 - 12.0);
-    final tableB = max(30.0, b2 - seatH / 2 - 12.0);
+    // ---- 中央公牌尺寸：在桌面内尽可能大，且不被两侧座位挡住 ----
+    var cardW = min(min(w * 0.155, tableH * 0.30), 62.0);
+    // 垂直空间：底池文字 + 公牌
+    cardW = min(cardW, (tableH * 0.62 - 30) / 1.4);
+    // 水平：与公牌带发生竖向重叠的座位，让出水平空间
+    final cardBandHalf = cardW * 1.4 / 2 + 12;
+    var rowHalfMax = tableW / 2 - 14;
+    for (final c0 in centers) {
+      if ((c0.dy - h / 2).abs() < cardBandHalf + seatH / 2) {
+        if (c0.dx < w / 2) {
+          rowHalfMax = min(rowHalfMax, w / 2 - c0.dx - seatW / 2 - 8);
+        } else {
+          rowHalfMax = min(rowHalfMax, c0.dx - seatW / 2 - w / 2 - 8);
+        }
+      }
+    }
+    cardW = max(30.0, min(cardW, (rowHalfMax * 2 - 16) / 5));
 
-    final children = <Widget>[
-      // 桌面
-      Center(
-        child: Container(
-          width: tableA * 2,
-          height: tableB * 2,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(tableB),
-            border: Border.all(color: AppTheme.tableRim, width: 8),
-            gradient: const RadialGradient(
-              colors: [AppTheme.tableGreen, AppTheme.tableGreenDark],
+    final boardRow = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < g.board.length; i++)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: CardView(card: g.board[i], width: cardW),
+          ),
+      ],
+    );
+
+    return Stack(
+      children: [
+        // 桌面
+        Center(
+          child: Container(
+            width: tableW,
+            height: tableH,
+            decoration: BoxDecoration(
+              borderRadius: tableRim,
+              border: Border.all(color: AppTheme.tableRim, width: 8),
+              gradient: const RadialGradient(
+                colors: [AppTheme.tableGreen, AppTheme.tableGreenDark],
+              ),
             ),
           ),
         ),
-      ),
-      // 中心：底池 + 公共牌 + 街名
-      Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('底池 ${AppTheme.money(g.potTotal)}',
-                style: const TextStyle(
-                    color: AppTheme.gold,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16)),
-            const SizedBox(height: 6),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (var i = 0; i < 5; i++)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
-                    child: i < g.board.length
-                        ? CardView(card: g.board[i], width: 42)
-                        : CardView.empty(width: 42),
-                  ),
-              ],
+        // 中央：底池（上）+ 公牌（中）
+        Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('底池 ${AppTheme.money(g.potTotal)}',
+                  style: const TextStyle(
+                      color: AppTheme.gold,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 17)),
+              if (g.board.isNotEmpty) const SizedBox(height: 10),
+              if (g.board.isNotEmpty) boardRow,
+            ],
+          ),
+        ),
+        // 对手座位
+        for (var k = 0; k < m; k++)
+          Positioned(
+            left: (centers[k].dx - seatW / 2).clamp(2.0, w - seatW - 2).toDouble(),
+            top: (centers[k].dy - seatH / 2).clamp(2.0, h - seatH - 2).toDouble(),
+            child: SeatView(
+              controller: controller,
+              seat: opponents[k],
+              width: seatW,
             ),
-          ],
-        ),
-      ),
-    ];
-
-    for (var d = 0; d < n; d++) {
-      final seat = ordered[d];
-      final rad = angles[d];
-      final cx = w / 2 + a2 * cos(rad);
-      final cy = h / 2 + b2 * sin(rad);
-      children.add(Positioned(
-        left: cx - seatW / 2,
-        top: cy - seatH / 2,
-        child: SeatView(
-          controller: controller,
-          seat: seat,
-          width: seatW,
-        ),
-      ));
-    }
-
-    return Stack(children: children);
+          ),
+      ],
+    );
   }
 }
 
@@ -356,8 +373,9 @@ class SeatView extends StatelessWidget {
     final isToAct = g.toAct == seat && !g.handOver;
     final showCards = p.hasCards &&
         (p.hole.isNotEmpty) &&
-        (seat == controller.mySeat || p.revealed);
+        (p.revealed); // 对手只有摊牌才亮牌
     final isDealer = g.button == seat && g.handNumber > 0;
+    final avatarB64 = controller.avatarsBySeat[seat];
 
     final Color ring = isToAct
         ? AppTheme.gold
@@ -365,23 +383,23 @@ class SeatView extends StatelessWidget {
             ? Colors.white12
             : Colors.white24;
 
-    // 底牌：自己/摊牌亮真牌；其余持牌者显示牌背；未持牌不显示
+    // 底牌：摊牌亮真牌；持牌未摊显示牌背；未持牌不显示
     final List<Widget> cardRow;
     if (!p.hasCards) {
-      cardRow = [const SizedBox(height: 22)];
+      cardRow = [];
     } else if (showCards) {
       cardRow = [
         for (final c in p.hole)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 1),
-            child: CardView(card: c, width: 20, small: true),
+            child: CardView(card: c, width: 22, small: true),
           ),
       ];
     } else {
       cardRow = [
-        CardView.back(width: 20, small: true),
+        CardView.back(width: 22, small: true),
         const SizedBox(width: 2),
-        CardView.back(width: 20, small: true),
+        CardView.back(width: 22, small: true),
       ];
     }
 
@@ -391,77 +409,107 @@ class SeatView extends StatelessWidget {
             ? 'ALL-IN'
             : p.folded
                 ? '弃牌'
-                : (g.toAct == seat && !g.handOver ? '思考中…' : '');
+                : (isToAct ? '思考中…' : '');
 
     return Opacity(
       opacity: p.folded ? 0.45 : 1,
       child: Container(
         width: width,
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
         decoration: BoxDecoration(
-          color: seat == controller.mySeat
-              ? Colors.blueGrey.shade800.withOpacity(0.92)
-              : AppTheme.panel.withOpacity(0.92),
-          borderRadius: BorderRadius.circular(10),
+          color: AppTheme.panel.withOpacity(0.92),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: ring, width: isToAct ? 2 : 1),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            Text(p.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 11, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 2),
+            Stack(
+              clipBehavior: Clip.none,
               children: [
-                if (isDealer)
-                  const Padding(
-                    padding: EdgeInsets.only(right: 3),
-                    child: Text('D',
-                        style: TextStyle(
-                            color: AppTheme.gold,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold)),
-                  ),
                 CircleAvatar(
-                  radius: 9,
+                  radius: 19,
                   backgroundColor: p.isAI ? Colors.teal : AppTheme.callBlue,
-                  child: Text(p.name.isNotEmpty ? p.name[0] : '?',
-                      style: const TextStyle(fontSize: 10)),
+                  backgroundImage: (avatarB64 != null && avatarB64.isNotEmpty)
+                      ? MemoryImage(base64Decode(avatarB64))
+                      : null,
+                  child: (avatarB64 == null || avatarB64.isEmpty)
+                      ? Text(p.name.isNotEmpty ? p.name[0] : '?',
+                          style: const TextStyle(fontSize: 15))
+                      : null,
                 ),
-                const SizedBox(width: 4),
-                Flexible(
-                  child: Text(p.name,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 11, fontWeight: FontWeight.bold)),
-                ),
+                if (isDealer)
+                  Positioned(
+                    right: -4,
+                    bottom: -2,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: const BoxDecoration(
+                          color: Colors.white, shape: BoxShape.circle),
+                      child: const Text('D',
+                          style: TextStyle(
+                              color: Colors.black87,
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold)),
+                    ),
+                  ),
               ],
             ),
+            const SizedBox(height: 2),
             Text(AppTheme.money(p.chips),
-                style: const TextStyle(fontSize: 11, color: AppTheme.gold)),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: cardRow,
-            ),
-            Text(
-              statusText,
-              style: TextStyle(
-                  fontSize: 9,
-                  color: p.allIn
-                      ? AppTheme.allinOrange
-                      : p.folded
-                          ? Colors.white38
-                          : Colors.white70),
-            ),
-            if (p.roundBet > 0 && !g.handOver)
-              Container(
-                margin: const EdgeInsets.only(top: 2),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: BoxDecoration(
-                  color: Colors.black26,
-                  borderRadius: BorderRadius.circular(8),
+                style: const TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.gold,
+                    fontWeight: FontWeight.bold)),
+            if (cardRow.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: cardRow,
                 ),
-                child: Text('下注 ${p.roundBet}',
-                    style: const TextStyle(fontSize: 9)),
+              ),
+            if (statusText.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: p.folded ? Colors.black26 : Colors.black45,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(statusText,
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: p.allIn
+                              ? AppTheme.allinOrange
+                              : p.folded
+                                  ? Colors.white38
+                                  : Colors.white70)),
+                ),
+              ),
+            if (p.roundBet > 0 && !g.handOver)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: AppTheme.gold.withOpacity(0.18),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.gold, width: 1),
+                  ),
+                  child: Text('下注 ${p.roundBet}',
+                      style: const TextStyle(
+                          fontSize: 10, color: AppTheme.gold)),
+                ),
               ),
           ],
         ),
@@ -558,7 +606,7 @@ class CardView extends StatelessWidget {
   }
 }
 
-// ---------------- 自己的信息条 ----------------
+// ---------------- 自己的信息条（底部：头像 + 昵称筹码 + 大底牌） ----------------
 
 class _HeroStrip extends StatelessWidget {
   final GameController controller;
@@ -568,22 +616,46 @@ class _HeroStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final g = controller.g;
     final me = g.players[controller.mySeat];
+    final avatarB64 = controller.avatarsBySeat[controller.mySeat] ??
+        (controller.myAvatarB64 ?? '');
+    final isDealer = g.button == controller.mySeat && g.handNumber > 0;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       color: AppTheme.panel,
       child: Row(
         children: [
-          for (final card in me.hole)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: CardView(card: card, width: 40),
-            ),
-          if (me.hole.isEmpty) ...[
-            CardView.back(width: 40),
-            const SizedBox(width: 6),
-            CardView.back(width: 40),
-          ],
-          const SizedBox(width: 12),
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              CircleAvatar(
+                radius: 24,
+                backgroundColor: me.isAI ? Colors.teal : AppTheme.callBlue,
+                backgroundImage:
+                    avatarB64.isNotEmpty ? MemoryImage(base64Decode(avatarB64)) : null,
+                child: avatarB64.isEmpty
+                    ? Text(me.name.isNotEmpty ? me.name[0] : '?',
+                        style: const TextStyle(fontSize: 18))
+                    : null,
+              ),
+              if (isDealer)
+                Positioned(
+                  right: -4,
+                  bottom: -2,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: const BoxDecoration(
+                        color: Colors.white, shape: BoxShape.circle),
+                    child: const Text('D',
+                        style: TextStyle(
+                            color: Colors.black87,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(width: 10),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -593,12 +665,22 @@ class _HeroStrip extends StatelessWidget {
               Text('筹码 ${AppTheme.money(me.chips)}',
                   style: const TextStyle(
                       color: AppTheme.gold, fontSize: 13)),
+              if (me.out)
+                const Text('已出局（观战中）',
+                    style: TextStyle(color: Colors.white38, fontSize: 11)),
             ],
           ),
           const Spacer(),
-          if (me.out)
-            const Text('你已出局（观战中）',
-                style: TextStyle(color: Colors.white38)),
+          if (me.hole.isEmpty) ...[
+            CardView.back(width: 58),
+            const SizedBox(width: 6),
+            CardView.back(width: 58),
+          ] else
+            for (final card in me.hole)
+              Padding(
+                padding: const EdgeInsets.only(left: 6),
+                child: CardView(card: card, width: 58),
+              ),
         ],
       ),
     );
@@ -636,7 +718,7 @@ class _LogTicker extends StatelessWidget {
       child: Container(
         width: double.infinity,
         color: Colors.black26,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         child: Text(
           last,
           maxLines: 1,
@@ -682,11 +764,11 @@ class _ActionBarState extends State<_ActionBar> {
           ? '${g.players[g.toAct].name} ${g.players[g.toAct].isAI ? "思考中…" : "行动中…"}'
           : '等待下一手…';
       return Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         color: AppTheme.panel,
         child: Center(
             child: Text(waiting,
-                style: const TextStyle(color: Colors.white54, fontSize: 15))),
+                style: const TextStyle(color: Colors.white54, fontSize: 14))),
       );
     }
 
@@ -757,14 +839,14 @@ class _ActionBarState extends State<_ActionBar> {
         children: [
           raisePanel,
           Padding(
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(8),
             child: Row(
               children: [
                 Expanded(
                   child: FilledButton(
                     style: FilledButton.styleFrom(
                         backgroundColor: AppTheme.foldRed,
-                        padding: const EdgeInsets.symmetric(vertical: 14)),
+                        padding: const EdgeInsets.symmetric(vertical: 12)),
                     onPressed: () => c.sendMyAction(const PokerAction('fold')),
                     child: const Text('弃牌'),
                   ),
@@ -775,7 +857,7 @@ class _ActionBarState extends State<_ActionBar> {
                   child: FilledButton(
                     style: FilledButton.styleFrom(
                         backgroundColor: AppTheme.callBlue,
-                        padding: const EdgeInsets.symmetric(vertical: 14)),
+                        padding: const EdgeInsets.symmetric(vertical: 12)),
                     onPressed: () => c.sendMyAction(
                         const PokerAction('call')),
                     child: Text(callLabel),
@@ -787,7 +869,7 @@ class _ActionBarState extends State<_ActionBar> {
                   child: FilledButton(
                     style: FilledButton.styleFrom(
                         backgroundColor: AppTheme.raiseGreen,
-                        padding: const EdgeInsets.symmetric(vertical: 14)),
+                        padding: const EdgeInsets.symmetric(vertical: 12)),
                     onPressed: legal.canRaise
                         ? () {
                             setState(() {
@@ -804,7 +886,7 @@ class _ActionBarState extends State<_ActionBar> {
                   child: FilledButton(
                     style: FilledButton.styleFrom(
                         backgroundColor: AppTheme.allinOrange,
-                        padding: const EdgeInsets.symmetric(vertical: 14)),
+                        padding: const EdgeInsets.symmetric(vertical: 12)),
                     onPressed: () {
                       if (legal.callAmount >= me.chips) {
                         c.sendMyAction(const PokerAction('call'));
@@ -974,7 +1056,7 @@ class _HostLobbyState extends State<_HostLobby> {
   Widget build(BuildContext context) {
     final c = widget.controller;
     final hs = c.hostSession!;
-    final clients = hs.pendingClients.values.toList();
+    final clients = hs.pendingClients.entries.toList();
     final total = 1 + clients.length + _aiFill;
     return Scaffold(
       backgroundColor: AppTheme.bg,
@@ -985,13 +1067,26 @@ class _HostLobbyState extends State<_HostLobby> {
           const Text('已连接玩家：',
               style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.gold)),
           ListTile(
-            leading: const CircleAvatar(child: Icon(Icons.person)),
+            leading: CircleAvatar(
+              backgroundImage: c.myAvatarB64 != null
+                  ? MemoryImage(base64Decode(c.myAvatarB64!))
+                  : null,
+              child: c.myAvatarB64 == null ? const Icon(Icons.person) : null,
+            ),
             title: Text('${c.myName}（本机/房主）'),
           ),
-          for (final name in clients)
+          for (final e in clients)
             ListTile(
-              leading: const CircleAvatar(child: Icon(Icons.person_outline)),
-              title: Text(name),
+              leading: CircleAvatar(
+                backgroundImage:
+                    c.pendingAvatars[e.key] != null
+                        ? MemoryImage(base64Decode(c.pendingAvatars[e.key]!))
+                        : null,
+                child: c.pendingAvatars[e.key] == null
+                    ? const Icon(Icons.person_outline)
+                    : null,
+              ),
+              title: Text(e.value),
             ),
           Container(
             margin: const EdgeInsets.symmetric(vertical: 8),
