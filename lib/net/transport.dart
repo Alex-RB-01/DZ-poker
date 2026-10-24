@@ -197,7 +197,8 @@ class LanTransport {
   }
 
   void broadcast(String data) {
-    for (final p in _peersById.values) {
+    // 快照后再遍历：socket.send 期间若连接断开触发 onDone -> _dropPeer 会改 _peersById
+    for (final p in _peersById.values.toList()) {
       p.send(data);
     }
   }
@@ -205,7 +206,9 @@ class LanTransport {
   Future<void> stop() async {
     _beaconTimer?.cancel();
     _beaconTimer = null;
-    for (final p in _peersById.values) {
+    // 必须先快照再遍历：socket.destroy() 会同步触发 onDone -> _dropPeer -> 修改 _peersById，
+    // 若直接遍历 _peersById.values 会抛 ConcurrentModificationError（已在 CI 集成测试收尾阶段复现）
+    for (final p in _peersById.values.toList()) {
       try {
         p.socket.destroy();
       } catch (_) {}
