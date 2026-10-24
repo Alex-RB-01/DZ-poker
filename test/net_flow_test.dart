@@ -57,7 +57,7 @@ void main() {
     await client.join('127.0.0.1', LanTransport.tcpPort, 'P2',
         avatarB64: 'aGVsbG8='); // base64('hello')
 
-    await waitFor(() => host.pendingClients.isNotEmpty,
+    await waitFor(() => host.pendingAvatars.isNotEmpty,
         what: 'host received hello');
     // hello 中携带的头像应被房主记录
     expect(host.pendingAvatars.isNotEmpty, isTrue,
