@@ -10,7 +10,7 @@ import 'package:flutter/services.dart';
 import '../engine/game.dart';
 import '../net/transport.dart';
 import '../state/controller.dart';
-import '../util/coin_sound.dart';
+import '../util/voice_sound.dart';
 import 'theme.dart';
 
 /// 牌桌布局计算结果（座位坐标、底池落点、公牌尺寸等），座位与金币动画共用同一坐标系。
@@ -150,6 +150,14 @@ class _GameScreenState extends State<GameScreen> {
       DeviceOrientation.portraitUp,
     ]);
     widget.controller.addListener(_onNotify);
+    // 房主/单机：任何座位行动（含本机、AI、联机对手）均按该座位性别播真人声
+    widget.controller.onAction = (seat, type, allIn) {
+      try {
+        final players = widget.controller.g.players;
+        if (seat < 0 || seat >= players.length) return;
+        VoiceSound.playAction(players[seat].gender, type, allIn);
+      } catch (_) {}
+    };
     _syncBaseline(widget.controller.g);
   }
 
@@ -163,7 +171,7 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   /// 监听牌局变化：检测「有人下注/跟注（底池增加）」与「赢池（handOver 且有结算）」，
-  /// 触发金币从座位→底池 / 底池→赢家 的飞行动画，并播放金币音效。
+  /// 触发金币从座位→底池 / 底池→赢家 的飞行动画（纯视觉，无金币音效）。
   void _onNotify() {
     final c = widget.controller;
     final g = c.g;
@@ -178,7 +186,6 @@ class _GameScreenState extends State<GameScreen> {
       return;
     }
 
-    var played = false;
     final pot = g.potTotal;
     if (pot > _prevPot) {
       for (var s = 0; s < g.players.length; s++) {
@@ -186,23 +193,16 @@ class _GameScreenState extends State<GameScreen> {
         final prev = _prevContrib[s] ?? 0;
         if (cur > prev) {
           final center = layout.seatCenters[s];
-          if (center != null) {
-            _coinFx.spawn(center, layout.potTarget);
-            played = true;
-          }
+          if (center != null) _coinFx.spawn(center, layout.potTarget);
         }
       }
     }
     if (g.handOver && !_prevHandOver && g.lastResult != null) {
       for (final seat in g.lastResult!.seatWin.keys) {
         final center = layout.seatCenters[seat];
-        if (center != null) {
-          _coinFx.spawn(layout.potTarget, center);
-          played = true;
-        }
+        if (center != null) _coinFx.spawn(layout.potTarget, center);
       }
     }
-    if (played) CoinSound.play();
 
     _prevPot = pot;
     _prevContrib = {
@@ -231,6 +231,7 @@ class _GameScreenState extends State<GameScreen> {
     return PopScope(
       canPop: false,
       child: Scaffold(
+        backgroundColor: AppTheme.bg,
         body: SafeArea(
           child: AnimatedBuilder(
             animation: widget.controller,
@@ -1037,6 +1038,15 @@ class _ActionBarState extends State<_ActionBar> {
   bool _raiseOpen = false;
   double _raiseValue = 0;
 
+  /// 客户端模式下，本机玩家点击动作按钮时播真人声（房主/单机由 onAction 统一播，避免重复）。
+  void _tapVoice(String type, bool allIn) {
+    if (widget.controller.mode != GameMode.client) return;
+    final g = widget.controller.g;
+    final seat = widget.controller.mySeat;
+    if (seat < 0 || seat >= g.players.length) return;
+    VoiceSound.playAction(g.players[seat].gender, type, allIn);
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = widget.controller;
@@ -1152,7 +1162,10 @@ class _ActionBarState extends State<_ActionBar> {
                     style: FilledButton.styleFrom(
                         backgroundColor: AppTheme.foldRed,
                         padding: const EdgeInsets.symmetric(vertical: 12)),
-                    onPressed: () => c.sendMyAction(const PokerAction('fold')),
+                    onPressed: () {
+                      _tapVoice('fold', false);
+                      c.sendMyAction(const PokerAction('fold'));
+                    },
                     child: const Text('弃牌'),
                   ),
                 ),
@@ -1163,8 +1176,10 @@ class _ActionBarState extends State<_ActionBar> {
                     style: FilledButton.styleFrom(
                         backgroundColor: AppTheme.callBlue,
                         padding: const EdgeInsets.symmetric(vertical: 12)),
-                    onPressed: () => c.sendMyAction(
-                        const PokerAction('call')),
+                    onPressed: () {
+                      _tapVoice('call', false);
+                      c.sendMyAction(const PokerAction('call'));
+                    },
                     child: Text(callLabel),
                   ),
                 ),
@@ -1177,6 +1192,7 @@ class _ActionBarState extends State<_ActionBar> {
                         padding: const EdgeInsets.symmetric(vertical: 12)),
                     onPressed: legal.canRaise
                         ? () {
+                            _tapVoice('raise', false);
                             setState(() {
                               _raiseOpen = !_raiseOpen;
                               _raiseValue = legal.minRaiseTo.toDouble();
@@ -1193,6 +1209,7 @@ class _ActionBarState extends State<_ActionBar> {
                         backgroundColor: AppTheme.allinOrange,
                         padding: const EdgeInsets.symmetric(vertical: 12)),
                     onPressed: () {
+                      _tapVoice('allin', true);
                       if (legal.callAmount >= me.chips) {
                         c.sendMyAction(const PokerAction('call'));
                       } else {

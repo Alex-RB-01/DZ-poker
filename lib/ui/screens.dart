@@ -151,6 +151,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
   int _aiCount = 3;
   List<BlindLevel> _levels = GameConfig.defaultLevels();
   String? _avatarB64;
+  String _gender = 'male'; // 'male' 帅哥 / 'female' 女神
+  bool _busy = false; // 创建房间时等待网络初始化
 
   @override
   Widget build(BuildContext context) {
@@ -176,6 +178,16 @@ class _LobbyScreenState extends State<LobbyScreen> {
           ),
           const Text('点头像可从相册选择照片作为头像',
               style: TextStyle(fontSize: 11, color: Colors.white38)),
+          const SizedBox(height: 12),
+          _sectionTitle('我的身份'),
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'male', label: Text('帅哥')),
+              ButtonSegment(value: 'female', label: Text('女神')),
+            ],
+            selected: {_gender},
+            onSelectionChanged: (s) => setState(() => _gender = s.first),
+          ),
           const SizedBox(height: 16),
           _sectionTitle('初始筹码'),
           Wrap(
@@ -246,9 +258,19 @@ class _LobbyScreenState extends State<LobbyScreen> {
             style: FilledButton.styleFrom(
                 backgroundColor: AppTheme.raiseGreen,
                 padding: const EdgeInsets.symmetric(vertical: 16)),
-            onPressed: _start,
-            child: Text(widget.local ? '开始游戏' : '创建房间并等待玩家加入',
-                style: const TextStyle(fontSize: 17)),
+            onPressed: _busy
+                ? null
+                : () {
+                    _start();
+                  },
+            child: _busy
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
+                : Text(widget.local ? '开始游戏' : '创建房间并等待玩家加入',
+                    style: const TextStyle(fontSize: 17)),
           ),
         ],
       ),
@@ -302,7 +324,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
     );
   }
 
-  void _start() {
+  Future<void> _start() async {
     final config = GameConfig(
       startingChips: _startingChips,
       levels: _levels,
@@ -312,16 +334,30 @@ class _LobbyScreenState extends State<LobbyScreen> {
     final name = _nameCtrl.text.trim().isEmpty ? '玩家' : _nameCtrl.text.trim();
     if (widget.local) {
       final c = GameController.local(
-          myName: name, aiCount: _aiCount, config: config);
+          myName: name, aiCount: _aiCount, config: config, myGender: _gender);
       c.myAvatarB64 = _avatarB64;
       if (_avatarB64 != null) c.avatarsBySeat[0] = _avatarB64!;
+      if (!mounted) return;
       Navigator.pushReplacement(context,
           MaterialPageRoute(builder: (_) => GameScreen(controller: c)));
-    } else {
-      final c = GameController.host(myName: name, config: config);
+      return;
+    }
+    // 房主：先初始化网络会话（建 socket），再进入等候房，避免灰屏/卡死
+    setState(() => _busy = true);
+    try {
+      final c = GameController.host(
+          myName: name, config: config, myGender: _gender);
       c.myAvatarB64 = _avatarB64;
+      await c.initHost();
+      if (!mounted) return;
       Navigator.pushReplacement(context,
           MaterialPageRoute(builder: (_) => GameScreen(controller: c)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('创建房间失败：$e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 }
@@ -342,6 +378,7 @@ class _JoinScreenState extends State<JoinScreen> {
   bool _started = false;
   bool _connecting = false;
   String? _avatarB64;
+  String _gender = 'male'; // 'male' 帅哥 / 'female' 女神
   GameController? _controller;
 
   @override
@@ -356,6 +393,7 @@ class _JoinScreenState extends State<JoinScreen> {
   Future<void> _startBrowsing() async {
     final session = ClientSession(
         myName: _name(),
+        myGender: _gender,
         onMessage: _onMsg,
         onChanged: () {
           if (mounted) setState(() {});
@@ -371,7 +409,8 @@ class _JoinScreenState extends State<JoinScreen> {
       return;
     }
     if (msg['t'] == 'seat') {
-      final c = GameController.client(myName: _name(), session: _session!);
+      final c = GameController.client(
+          myName: _name(), session: _session!, myGender: _gender);
       c.myAvatarB64 = _avatarB64;
       c.onClientMessage(msg);
       _controller = c;
@@ -442,6 +481,25 @@ class _JoinScreenState extends State<JoinScreen> {
                     decoration: const InputDecoration(
                         labelText: '我的昵称', border: OutlineInputBorder()),
                   ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                const Text('身份：', style: TextStyle(color: Colors.white70)),
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'male', label: Text('帅哥')),
+                    ButtonSegment(value: 'female', label: Text('女神')),
+                  ],
+                  selected: {_gender},
+                  onSelectionChanged: (s) {
+                    setState(() => _gender = s.first);
+                    _session?.setMyGender(_gender); // 同步给已建会话
+                  },
                 ),
               ],
             ),

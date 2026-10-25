@@ -36,6 +36,7 @@ void main() {
     // ---- 房主 ----
     final host = GameController.host(myName: 'Host', config: GameConfig());
     addTearDown(host.dispose);
+    await host.initHost(); // 显式启动网络会话（建 TCP 服务端）
 
     // ---- 客人（模拟 JoinScreen 的消息接线）----
     GameController? cctrl;

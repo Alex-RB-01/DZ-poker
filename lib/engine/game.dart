@@ -141,6 +141,7 @@ class PlayerState {
   String name;
   bool isAI;
   int chips;
+  String gender; // 'male' 男声 / 'female' 女声（用于动作语音）
   List<Card> hole = const [];
   int roundBet = 0; // 本轮下注
   int totalContributed = 0; // 本手总投入
@@ -152,7 +153,11 @@ class PlayerState {
   bool revealed = false; // 摊牌亮牌
 
   PlayerState(
-      {required this.seat, required this.name, this.isAI = false, this.chips = 0});
+      {required this.seat,
+      required this.name,
+      this.isAI = false,
+      this.gender = 'male',
+      this.chips = 0});
 
   bool get inHand => hasCards && !folded;
 }
@@ -160,7 +165,8 @@ class PlayerState {
 class PlayerSeed {
   final String name;
   final bool isAI;
-  const PlayerSeed(this.name, {this.isAI = false});
+  final String gender; // 'male' / 'female'
+  const PlayerSeed(this.name, {this.isAI = false, this.gender = 'male'});
 }
 
 class BlindLevel {
@@ -298,6 +304,7 @@ class GameState {
             seat: i,
             name: seeds[i].name,
             isAI: seeds[i].isAI,
+            gender: seeds[i].gender,
             chips: config.startingChips)
     ];
     button = players.length - 1; // 第一手会轮到 0
@@ -686,6 +693,7 @@ class GameState {
             'name': p.name,
             'chips': p.chips,
             'isAI': p.isAI,
+            'gender': p.gender,
             'roundBet': p.roundBet,
             'totalContributed': p.totalContributed,
             'folded': p.folded,
@@ -746,6 +754,7 @@ class GameState {
             seat: (p['seat'] as num).toInt(),
             name: p['name'] as String,
             isAI: p['isAI'] as bool,
+            gender: (p['gender'] as String?) ?? 'male',
             chips: (p['chips'] as num).toInt(),
           );
           ps.roundBet = (p['roundBet'] as num).toInt();

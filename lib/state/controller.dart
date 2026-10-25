@@ -19,6 +19,11 @@ class GameController extends ChangeNotifier {
   GameState g; // 客户端模式下随快照重建，故不可 final
   final Random rng;
   final String myName;
+  String myGender = 'male'; // 本机玩家性别：'male' 男声 / 'female' 女声
+
+  /// 动作发生回调：座位号 + 动作类型 + 是否全下。房主/单机用它在 UI 侧播音。
+  void Function(int seat, String type, bool allIn)? onAction;
+
   int mySeat = 0;
 
   HostSession? hostSession;
@@ -55,12 +60,14 @@ class GameController extends ChangeNotifier {
       {required String myName,
       required int aiCount,
       required GameConfig config,
+      String myGender = 'male',
       int? seed}) {
     final c = GameController._(
         mode: GameMode.local, name: myName, config: config, seed: seed);
-    final roster = <PlayerSeed>[PlayerSeed(myName)];
+    c.myGender = myGender;
+    final roster = <PlayerSeed>[PlayerSeed(myName, gender: myGender)];
     for (var i = 1; i <= aiCount && roster.length < 10; i++) {
-      roster.add(PlayerSeed('AI $i', isAI: true));
+      roster.add(PlayerSeed('AI $i', isAI: true, gender: 'male'));
     }
     c.g.newGame(roster);
     c.g.startHand();
@@ -71,24 +78,40 @@ class GameController extends ChangeNotifier {
 
   /// 蓝牙房主：先广播房间，客人连入后 startNetworkGame 开局
   factory GameController.host(
-      {required String myName, required GameConfig config}) {
+      {required String myName,
+      required GameConfig config,
+      String myGender = 'male'}) {
     final c = GameController._(
         mode: GameMode.host, name: myName, config: config);
+    c.myGender = myGender;
     c.hostSession = HostSession(
       roomName: myName,
       onMessage: c._onHostMessage,
       onChanged: c._safeNotify,
       onPeerDisconnected: c._onPeerDisconnected,
     );
-    c.hostSession!.start();
+    // 注意：会话初始化（建 socket）改为由调用方 await initHost()，
+    // 避免 fire-and-forget 的未捕获异步异常导致 release 灰屏。
     return c;
+  }
+
+  /// 真正启动房主网络会话（建 UDP/TCP）。网络受限时捕获异常，不阻断 UI。
+  Future<void> initHost() async {
+    try {
+      await hostSession?.start();
+    } catch (_) {
+      // 网络初始化失败（如权限/端口）：仍允许「纯 AI 开局」，仅无法联机
+    }
   }
 
   /// 蓝牙客人
   factory GameController.client(
-      {required String myName, required ClientSession session}) {
+      {required String myName,
+      required ClientSession session,
+      String myGender = 'male'}) {
     final c = GameController._(
         mode: GameMode.client, name: myName, config: GameConfig());
+    c.myGender = myGender;
     c.clientSession = session;
     return c;
   }
@@ -98,19 +121,20 @@ class GameController extends ChangeNotifier {
   void startNetworkGame({required int aiFill}) {
     final hs = hostSession;
     if (hs == null) return;
-    final roster = <PlayerSeed>[PlayerSeed(myName)];
+    final roster = <PlayerSeed>[PlayerSeed(myName, gender: myGender)];
     avatarsBySeat[0] = myAvatarB64 ?? '';
     var seat = 1;
     for (final entry in hs.pendingClients.entries) {
       if (roster.length >= 10) break;
-      roster.add(PlayerSeed(entry.value));
+      roster.add(PlayerSeed(entry.value,
+          gender: hs.pendingGenders[entry.key] ?? 'male'));
       _seatByPeer[entry.key] = seat;
       avatarsBySeat[seat] = _pendingAvatars[entry.key] ?? '';
       seat++;
     }
     var ai = 1;
     while (roster.length < 10 && ai <= aiFill) {
-      roster.add(PlayerSeed('AI $ai', isAI: true));
+      roster.add(PlayerSeed('AI $ai', isAI: true, gender: 'male'));
       ai++;
     }
     // 通知各客人座位号 + 全桌头像表
@@ -143,6 +167,8 @@ class GameController extends ChangeNotifier {
       case 'hello':
         hostSession?.pendingClients[peerId] =
             (msg['name'] ?? '玩家').toString();
+        hostSession?.setPendingGender(
+            peerId, (msg['gender'] ?? 'male').toString());
         final av = msg['avatar'];
         if (av is String && av.isNotEmpty) {
           _pendingAvatars[peerId] = av;
@@ -211,7 +237,13 @@ class GameController extends ChangeNotifier {
   void applyAction(int seat, PokerAction a) {
     if (mode == GameMode.client) return;
     final ok = g.act(seat, a);
-    if (ok) _afterChange();
+    if (ok) {
+      // 通知 UI 播放该座位的真人声动作语音（含是否全下）
+      try {
+        onAction?.call(seat, a.type, g.players[seat].chips == 0);
+      } catch (_) {}
+      _afterChange();
+    }
   }
 
   void nextHand() {

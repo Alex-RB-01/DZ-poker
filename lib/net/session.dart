@@ -19,6 +19,10 @@ class HostSession {
   /// peerId -> 玩家昵称（已连入、收到 hello 后入座等待）
   final Map<String, String> pendingClients = {};
 
+  /// peerId -> 玩家性别（'male' / 'female'），用于动作语音
+  final Map<String, String> _pendingGenders = {};
+  Map<String, String> get pendingGenders => _pendingGenders;
+
   HostSession(
       {required this.onMessage,
       required this.onChanged,
@@ -31,13 +35,23 @@ class HostSession {
         onPeerDisconnected?.call(p.id);
       }
       onChanged();
-    });
+    }, onError: (_) {});
     transport.messages.listen((m) {
       try {
         final map = jsonDecode(m.data) as Map<String, dynamic>;
         onMessage(m.fromId, map);
       } catch (_) {}
-    });
+    }, onError: (_) {});
+  }
+
+  /// 客人发来的 hello 里携带的性别（房主侧记录，开局时写入座位）
+  void setPendingGender(String peerId, String gender) {
+    _pendingGenders[peerId] = gender;
+  }
+
+  /// 设置本机性别（昵称设置页切换 帅哥/女神 时同步给已建会话）
+  void setMyGender(String gender) {
+    _myGender = gender;
   }
 
   Future<void> start() => transport.init();
@@ -61,30 +75,37 @@ class ClientSession {
   String? hostPeerId;
   String? _myName;
   String? _myAvatar;
+  String? _myGender;
   bool _helloSent = false;
 
   ClientSession(
       {required String myName,
       required this.onMessage,
-      required this.onChanged})
-      : transport = LanTransport(isHost: false, deviceName: myName) {
+      required this.onChanged,
+      String myGender = 'male'})
+      : _myGender = myGender,
+        transport = LanTransport(isHost: false, deviceName: myName) {
     transport.beacons.listen((b) {
       hosts[b.id] = b;
       onChanged();
-    });
+    }, onError: (_) {});
     transport.peers.listen((p) {
       if (p.connected) {
         hostPeerId ??= p.id;
         if (!_helloSent && _myName != null) {
           _helloSent = true;
-          transport.send(p.id,
-              jsonEncode({'t': 'hello', 'name': _myName, 'avatar': _myAvatar}));
+          transport.send(p.id, jsonEncode({
+            't': 'hello',
+            'name': _myName,
+            'avatar': _myAvatar,
+            'gender': _myGender ?? 'male',
+          }));
         }
       } else {
         if (hostPeerId == p.id) hostPeerId = null;
       }
       onChanged();
-    });
+    }, onError: (_) {});
     transport.messages.listen((m) {
       try {
         final map = jsonDecode(m.data) as Map<String, dynamic>;
@@ -93,7 +114,7 @@ class ClientSession {
         }
         onMessage(map);
       } catch (_) {}
-    });
+    }, onError: (_) {});
   }
 
   Future<void> start() => transport.init();
