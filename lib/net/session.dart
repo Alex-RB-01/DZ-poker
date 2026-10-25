@@ -49,11 +49,6 @@ class HostSession {
     _pendingGenders[peerId] = gender;
   }
 
-  /// 设置本机性别（昵称设置页切换 帅哥/女神 时同步给已建会话）
-  void setMyGender(String gender) {
-    _myGender = gender;
-  }
-
   Future<void> start() => transport.init();
 
   void sendTo(String peerId, Map<String, dynamic> obj) =>
@@ -77,6 +72,12 @@ class ClientSession {
   String? _myAvatar;
   String? _myGender;
   bool _helloSent = false;
+
+  /// 设置本机性别（昵称设置页切换 帅哥/女神 时同步给已建会话）；
+  /// hello 在连上房主后发送，故在连接前切换即生效。
+  void setMyGender(String gender) {
+    _myGender = gender;
+  }
 
   ClientSession(
       {required String myName,
