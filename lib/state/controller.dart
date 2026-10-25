@@ -104,6 +104,15 @@ class GameController extends ChangeNotifier {
     }
   }
 
+  /// 后台启动房主网络会话：不 await、不抛未捕获异常。
+  /// 点「创建房间」后立刻进入等候房，联网在后台进行；即便失败也照常可 AI 开局。
+  void startHostInBackground() {
+    final hs = hostSession;
+    if (hs == null) return;
+    // fire-and-forget，但内部已 try/catch，绝不向 UI 抛出未捕获异步错误
+    unawaited(hs.start().catchError((_) {}));
+  }
+
   /// 蓝牙客人
   factory GameController.client(
       {required String myName,

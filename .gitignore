@@ -1,1 +1,4 @@
 release_apk/
+.dart_tool/
+build/
+pubspec.lock

@@ -152,7 +152,6 @@ class _LobbyScreenState extends State<LobbyScreen> {
   List<BlindLevel> _levels = GameConfig.defaultLevels();
   String? _avatarB64;
   String _gender = 'male'; // 'male' 帅哥 / 'female' 女神
-  bool _busy = false; // 创建房间时等待网络初始化
 
   @override
   Widget build(BuildContext context) {
@@ -258,19 +257,11 @@ class _LobbyScreenState extends State<LobbyScreen> {
             style: FilledButton.styleFrom(
                 backgroundColor: AppTheme.raiseGreen,
                 padding: const EdgeInsets.symmetric(vertical: 16)),
-            onPressed: _busy
-                ? null
-                : () {
-                    _start();
-                  },
-            child: _busy
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white))
-                : Text(widget.local ? '开始游戏' : '创建房间并等待玩家加入',
-                    style: const TextStyle(fontSize: 17)),
+            onPressed: () {
+              _start();
+            },
+            child: Text(widget.local ? '开始游戏' : '创建房间并等待玩家加入',
+                style: const TextStyle(fontSize: 17)),
           ),
         ],
       ),
@@ -342,23 +333,15 @@ class _LobbyScreenState extends State<LobbyScreen> {
           MaterialPageRoute(builder: (_) => GameScreen(controller: c)));
       return;
     }
-    // 房主：先初始化网络会话（建 socket），再进入等候房，避免灰屏/卡死
-    setState(() => _busy = true);
-    try {
-      final c = GameController.host(
-          myName: name, config: config, myGender: _gender);
-      c.myAvatarB64 = _avatarB64;
-      await c.initHost();
-      if (!mounted) return;
-      Navigator.pushReplacement(context,
-          MaterialPageRoute(builder: (_) => GameScreen(controller: c)));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('创建房间失败：$e')));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    // 房主：直接进入等候房，联网在后台启动（不阻塞、不因网络失败而灰屏）。
+    // 即便局域网不可用，也能照常 AI 开局。
+    final c = GameController.host(
+        myName: name, config: config, myGender: _gender);
+    c.myAvatarB64 = _avatarB64;
+    if (!mounted) return;
+    Navigator.pushReplacement(context,
+        MaterialPageRoute(builder: (_) => GameScreen(controller: c)));
+    c.startHostInBackground();
   }
 }
 
