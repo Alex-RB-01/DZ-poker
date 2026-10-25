@@ -141,5 +141,12 @@ class ClientSession {
     transport.send(hp, jsonEncode({'t': 'next'}));
   }
 
+  /// 请求房主重开一场新比赛（锦标赛结束后）
+  Future<void> sendRestart() async {
+    final hp = hostPeerId;
+    if (hp == null) return;
+    transport.send(hp, jsonEncode({'t': 'restart'}));
+  }
+
   Future<void> stop() => transport.stop();
 }

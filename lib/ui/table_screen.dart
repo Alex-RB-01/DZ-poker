@@ -1338,11 +1338,10 @@ class _GameOver extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              if (controller.mode != GameMode.client)
-                FilledButton(
-                  onPressed: () => controller.nextHand(),
-                  child: const Text('再来一场（新比赛需重开）'),
-                ),
+              FilledButton(
+                onPressed: () => controller.requestRestart(),
+                child: const Text('再来一场'),
+              ),
               const SizedBox(width: 12),
               OutlinedButton(
                 onPressed: () => Navigator.of(context, rootNavigator: true)

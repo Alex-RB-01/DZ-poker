@@ -10,6 +10,7 @@ import '../net/session.dart';
 import '../net/transport.dart';
 import '../state/controller.dart';
 import '../util/avatar.dart';
+import '../util/profile.dart';
 import 'table_screen.dart';
 import 'theme.dart';
 
@@ -154,6 +155,30 @@ class _LobbyScreenState extends State<LobbyScreen> {
   String _gender = 'male'; // 'male' 帅哥 / 'female' 女神
 
   @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  /// 加载已保存的昵称 / 性别 / 头像（单机与联网共用，除非手动改否则一直保留）
+  Future<void> _loadProfile() async {
+    final name = await ProfileStore.loadName();
+    final gender = await ProfileStore.loadGender();
+    final avatarB64 = await AvatarStore.toBase64(await AvatarStore.loadPath());
+    if (!mounted) return;
+    setState(() {
+      _nameCtrl.text = name;
+      _gender = (gender == 'female') ? 'female' : 'male';
+      _avatarB64 = avatarB64;
+    });
+  }
+
+  /// 昵称改动时保存（debounce 由 TextField 的 onChanged 触发即可，此处直接保存）
+  Future<void> _saveName(String name) => ProfileStore.saveName(name);
+
+  Future<void> _saveGender(String gender) => ProfileStore.saveGender(gender);
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
@@ -169,6 +194,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
               Expanded(
                 child: TextField(
                   controller: _nameCtrl,
+                  onChanged: _saveName,
                   decoration: const InputDecoration(
                       labelText: '我的昵称', border: OutlineInputBorder()),
                 ),
@@ -185,7 +211,10 @@ class _LobbyScreenState extends State<LobbyScreen> {
               ButtonSegment(value: 'female', label: Text('女神')),
             ],
             selected: {_gender},
-            onSelectionChanged: (s) => setState(() => _gender = s.first),
+            onSelectionChanged: (s) {
+              setState(() => _gender = s.first);
+              _saveGender(_gender);
+            },
           ),
           const SizedBox(height: 16),
           _sectionTitle('初始筹码'),
@@ -367,7 +396,21 @@ class _JoinScreenState extends State<JoinScreen> {
   @override
   void initState() {
     super.initState();
+    _loadProfile();
     _startBrowsing();
+  }
+
+  /// 加载已保存的昵称 / 性别 / 头像
+  Future<void> _loadProfile() async {
+    final name = await ProfileStore.loadName();
+    final gender = await ProfileStore.loadGender();
+    final avatarB64 = await AvatarStore.toBase64(await AvatarStore.loadPath());
+    if (!mounted) return;
+    setState(() {
+      _nameCtrl.text = name;
+      _gender = (gender == 'female') ? 'female' : 'male';
+      _avatarB64 = avatarB64;
+    });
   }
 
   String _name() =>
@@ -461,6 +504,7 @@ class _JoinScreenState extends State<JoinScreen> {
                 Expanded(
                   child: TextField(
                     controller: _nameCtrl,
+                    onChanged: ProfileStore.saveName,
                     decoration: const InputDecoration(
                         labelText: '我的昵称', border: OutlineInputBorder()),
                   ),
@@ -482,6 +526,7 @@ class _JoinScreenState extends State<JoinScreen> {
                   onSelectionChanged: (s) {
                     setState(() => _gender = s.first);
                     _session?.setMyGender(_gender); // 同步给已建会话
+                    ProfileStore.saveGender(_gender);
                   },
                 ),
               ],

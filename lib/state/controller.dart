@@ -187,6 +187,8 @@ class GameController extends ChangeNotifier {
         _safeNotify();
       case 'next':
         nextHand();
+      case 'restart':
+        restartMatch();
       case 'action':
         final seat = _seatByPeer[peerId];
         if (seat != null) {
@@ -268,6 +270,30 @@ class GameController extends ChangeNotifier {
     if (mode == GameMode.client || !g.handOver || g.gameOver) return;
     g.startHand();
     _afterChange();
+  }
+
+  /// 锦标赛结束后重开一场新比赛（房主/单机）。
+  /// 复用当前已入座的玩家（顺序、姓名、性别、是否 AI 不变），重新 newGame。
+  void restartMatch() {
+    if (mode == GameMode.client || !g.gameOver) return;
+    final roster = <PlayerSeed>[
+      for (final p in g.players)
+        PlayerSeed(p.name, isAI: p.isAI, gender: p.gender)
+    ];
+    if (roster.isEmpty) return;
+    g.newGame(roster);
+    g.startHand();
+    _startBlindTimerIfNeeded();
+    _afterChange(); // 广播快照，客户端自动同步新比赛
+  }
+
+  /// 请求重开一场新比赛：房主/单机直接开；客人发消息请房主开。
+  void requestRestart() {
+    if (mode == GameMode.client) {
+      clientSession?.sendRestart();
+    } else {
+      restartMatch();
+    }
   }
 
   /// 请求开下一手：房主/单机直接开；客人发消息请房主开
