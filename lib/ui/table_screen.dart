@@ -40,9 +40,11 @@ TableLayout computeTableLayout(GameController controller, Size size) {
   final tableW = w * 0.92;
   final tableH = h * 0.86;
   final mySeat = controller.mySeat;
+  // 对手按「顺时针」绕桌收集：从 mySeat+1 开始，座位号递增（模 n）。
+  // 这样保证：每个玩家的「右手边（顺时针下一张）」永远是座位号 +1，
+  // 「左手边（逆时针上一张）」是座位号 -1，所有玩家看到的相对顺序一致。
   final opponents = <int>[
-    for (var s = 0; s < n; s++)
-      if (s != mySeat) s
+    for (var d = 1; d < n; d++) (mySeat + d) % n
   ];
   final m = opponents.length;
 
@@ -55,13 +57,16 @@ TableLayout computeTableLayout(GameController controller, Size size) {
   final A = tableW / 2 - seatW * 0.30;
   final B = tableH / 2 - seatH * 0.30;
 
-  // 对手分布：避开底部（自己占底部），从左下 140° 经顶部 270° 到右下 40°
+  // 对手分布：避开底部（自己占底部）。
+  // opponents[0]=mySeat+1 是「右手边(顺时针下一张)」，应放在右下；依次沿桌面逆时针排到左上、左下。
+  // 屏幕坐标：θ=400°(=40°) 在右下(右手)、θ=140° 在左下(左手)、θ=270° 在正上方。
+  // 故角度从 400° 递减到 140°，使 opponents 索引越大越靠「左手边」，符合座位环绕顺序。
   List<double> angles;
   if (m == 1) {
     angles = [270.0 * pi / 180];
   } else {
     angles = [
-      for (var k = 0; k < m; k++) (140 + k * 260 / (m - 1)) * pi / 180
+      for (var k = 0; k < m; k++) (400 - k * 260 / (m - 1)) * pi / 180
     ];
   }
 

@@ -134,11 +134,12 @@ class LanTransport {
     final body = jsonEncode(
         {'t': 'beacon', 'name': deviceName, 'port': _actualPort, 'addr': ip});
     final data = utf8.encode(body);
-    // 组播（可能被 Wi-Fi 屏蔽）+ 受限广播 255.255.255.255（兜底，覆盖同网段）+ 子网定向广播（最稳）
-    const targets = <String>[multicastGroup, '255.255.255.255'];
+    // 组播（可能被 Wi-Fi 屏蔽）+ 受限广播 255.255.255.255（兜底，覆盖同网段）+ 子网定向广播（最稳）。
+    // 注意：必须是可变列表——原 const 列表调 .add() 会在运行时抛 UnsupportedError，导致一条信标都发不出去。
+    final targets = <String>[multicastGroup, '255.255.255.255'];
     try {
       final subnet = _subnetBroadcast(ip);
-      if (subnet != null) targets.add(subnet);
+      if (subnet != null && !targets.contains(subnet)) targets.add(subnet);
     } catch (_) {}
     for (final t in targets) {
       try {
