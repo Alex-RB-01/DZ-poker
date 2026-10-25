@@ -16,9 +16,10 @@ import edge_tts
 OUT_DIR = os.path.join(os.path.dirname(__file__), 'assets', 'voices')
 TEXTS = {
     'fold': '弃牌',
+    'check': '过牌',
     'call': '跟注',
     'raise': '加注',
-    'allin': '全下',
+    'allin': 'all in',
 }
 VOICES = {
     'male': 'zh-CN-YunxiNeural',     # 男声

@@ -245,11 +245,20 @@ class GameController extends ChangeNotifier {
 
   void applyAction(int seat, PokerAction a) {
     if (mode == GameMode.client) return;
+    final chipsBefore = g.players[seat].chips;
     final ok = g.act(seat, a);
     if (ok) {
       // 通知 UI 播放该座位的真人声动作语音（含是否全下）
+      final allIn = g.players[seat].chips == 0;
+      // 修正动作语义：call 但未付出任何筹码 => 实为「过牌(check)」
+      var type = a.type;
+      if (type == 'call' &&
+          g.players[seat].chips == chipsBefore &&
+          !allIn) {
+        type = 'check';
+      }
       try {
-        onAction?.call(seat, a.type, g.players[seat].chips == 0);
+        onAction?.call(seat, type, allIn);
       } catch (_) {}
       _afterChange();
     }

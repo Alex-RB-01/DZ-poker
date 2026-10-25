@@ -1177,7 +1177,7 @@ class _ActionBarState extends State<_ActionBar> {
                         backgroundColor: AppTheme.callBlue,
                         padding: const EdgeInsets.symmetric(vertical: 12)),
                     onPressed: () {
-                      _tapVoice('call', false);
+                      _tapVoice(canCheck ? 'check' : 'call', false);
                       c.sendMyAction(const PokerAction('call'));
                     },
                     child: Text(callLabel),

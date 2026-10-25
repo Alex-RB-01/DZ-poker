@@ -12,7 +12,7 @@ import 'package:audioplayers/audioplayers.dart';
 class VoiceSound {
   VoiceSound._();
 
-  /// 播放某座位的动作语音。allIn=true 时统一播「全下」，覆盖 call/raise 的实际类型。
+  /// 播放某座位的动作语音。allIn=true 时统一播英文 "all in"，覆盖 call/raise 的实际类型。
   static Future<void> playAction(
       String gender, String action, bool allIn) async {
     final String clip;
@@ -20,12 +20,14 @@ class VoiceSound {
       clip = 'allin';
     } else if (action == 'fold') {
       clip = 'fold';
+    } else if (action == 'check') {
+      clip = 'check';
     } else if (action == 'call') {
       clip = 'call';
     } else if (action == 'raise') {
       clip = 'raise';
     } else {
-      return; // check 等不发音
+      return; // 未知动作不发音
     }
     final g = (gender == 'female') ? 'female' : 'male';
     final asset = 'voices/voice_${g}_$clip.mp3';
