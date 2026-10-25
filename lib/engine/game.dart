@@ -257,7 +257,9 @@ class LegalActions {
 class GameState {
   final Random rng;
   GameConfig config;
-  late List<PlayerState> players;
+  // 默认为空列表：房主模式在点「开始游戏」前 newGame() 尚未调用，此时 players 应为空，
+  // 便于 UI 安全渲染等候房（原 late 字段会在未初始化时访问即抛 LateInitializationError）。
+  List<PlayerState> players = [];
   int button = 0;
   int level = 0;
   int handsAtLevel = 0;
