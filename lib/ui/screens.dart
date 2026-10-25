@@ -76,12 +76,12 @@ class HomeScreen extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                     color: AppTheme.gold)),
             const SizedBox(height: 8),
-            const Text('单机 AI · 同 WiFi 联机 · 最多 10 人 · 锦标赛盲注',
+            const Text('电子筹码 · 同 WiFi 联机 · 最多 10 人 · 锦标赛盲注',
                 style: TextStyle(color: Colors.white54)),
             const SizedBox(height: 40),
             _MenuButton(
               icon: Icons.smartphone,
-              label: '单机对战（AI）',
+              label: '单机记分（本机裁判）',
               onTap: () => Navigator.push(context,
                   MaterialPageRoute(builder: (_) => const LobbyScreen(local: true))),
             ),
@@ -149,7 +149,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
   int _startingChips = 5000;
   int _advanceEvery = 10;
   String _advanceMode = 'hands'; // hands | minutes
-  int _aiCount = 3;
+  int _playerCount = 4;
   List<BlindLevel> _levels = GameConfig.defaultLevels();
   String? _avatarB64;
   String _gender = 'male'; // 'male' 帅哥 / 'female' 女神
@@ -182,7 +182,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-          title: Text(widget.local ? '单机对战' : '创建 Wi-Fi 房间')),
+          title: Text(widget.local ? '单机记分' : '创建 Wi-Fi 房间')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -271,14 +271,14 @@ class _LobbyScreenState extends State<LobbyScreen> {
               )),
           if (widget.local) ...[
             const SizedBox(height: 16),
-            _sectionTitle('AI 对手数量：$_aiCount'),
+            _sectionTitle('玩家人数：$_playerCount（本机 1 人 + 本地真人 ${_playerCount - 1} 位）'),
             Slider(
-              value: _aiCount.toDouble(),
-              min: 1,
-              max: 9,
+              value: _playerCount.toDouble(),
+              min: 2,
+              max: 10,
               divisions: 8,
-              label: '$_aiCount',
-              onChanged: (v) => setState(() => _aiCount = v.round()),
+              label: '$_playerCount',
+              onChanged: (v) => setState(() => _playerCount = v.round()),
             ),
           ],
           const SizedBox(height: 24),
@@ -354,7 +354,10 @@ class _LobbyScreenState extends State<LobbyScreen> {
     final name = _nameCtrl.text.trim().isEmpty ? '玩家' : _nameCtrl.text.trim();
     if (widget.local) {
       final c = GameController.local(
-          myName: name, aiCount: _aiCount, config: config, myGender: _gender);
+          myName: name,
+          playerCount: _playerCount,
+          config: config,
+          myGender: _gender);
       c.myAvatarB64 = _avatarB64;
       if (_avatarB64 != null) c.avatarsBySeat[0] = _avatarB64!;
       if (!mounted) return;
@@ -363,7 +366,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
       return;
     }
     // 房主：直接进入等候房，联网在后台启动（不阻塞、不因网络失败而灰屏）。
-    // 即便局域网不可用，也能照常 AI 开局。
+    // 即便局域网不可用，也能照常进入等候房。
     final c = GameController.host(
         myName: name, config: config, myGender: _gender);
     c.myAvatarB64 = _avatarB64;

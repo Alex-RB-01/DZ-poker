@@ -1,4 +1,4 @@
-/// 德州扑克（蓝牙局域网 · 锦标赛盲注 · 支持 AI 单机）入口
+/// 德州扑克电子筹码（局域网 · 锦标赛盲注 · 单机记分）入口
 library;
 
 import 'package:flutter/material.dart';

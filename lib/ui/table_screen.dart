@@ -440,6 +440,21 @@ class _TableArea extends StatelessWidget {
       required this.layout,
       required this.coinFx});
 
+  /// 中央提示文字：显示当前街道（翻牌前/翻牌/转牌/河牌）。
+  String _streetHint(GameState g) {
+    if (g.handOver) return '';
+    switch (g.street) {
+      case Street.preflop:
+        return '翻牌前下注';
+      case Street.flop:
+        return '翻牌 · 下注';
+      case Street.turn:
+        return '转牌 · 下注';
+      case Street.river:
+        return '河牌 · 下注';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final g = controller.g;
@@ -451,21 +466,9 @@ class _TableArea extends StatelessWidget {
     final tableH = layout.tableH;
     final seatW = layout.seatW;
     final seatH = layout.seatH;
-    final cardW = layout.cardW;
     final mySeat = controller.mySeat;
 
     final tableRim = BorderRadius.circular(tableH / 2);
-
-    final boardRow = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (var i = 0; i < g.board.length; i++)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            child: CardView(card: g.board[i], width: cardW),
-          ),
-      ],
-    );
 
     return Stack(
       children: [
@@ -483,7 +486,7 @@ class _TableArea extends StatelessWidget {
             ),
           ),
         ),
-        // 中央：底池（上）+ 公牌（中）
+        // 中央：底池 + 当前街道提示（无公牌）
         Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -493,8 +496,11 @@ class _TableArea extends StatelessWidget {
                       color: AppTheme.gold,
                       fontWeight: FontWeight.bold,
                       fontSize: 17)),
-              if (g.board.isNotEmpty) const SizedBox(height: 10),
-              if (g.board.isNotEmpty) boardRow,
+              const SizedBox(height: 8),
+              Text(_streetHint(g),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: Colors.white54, fontSize: 12)),
             ],
           ),
         ),
@@ -512,7 +518,6 @@ class _TableArea extends StatelessWidget {
               seat: s,
               width: seatW,
               isMe: s == mySeat,
-              showHole: s != mySeat,
             ),
           ),
         // 金币飞行动画图层（座位↔底池）
@@ -655,23 +660,18 @@ class SeatView extends StatelessWidget {
   final int seat;
   final double width;
   final bool isMe;
-  final bool showHole;
   const SeatView(
       {super.key,
       required this.controller,
       required this.seat,
       required this.width,
-      this.isMe = false,
-      this.showHole = true});
+      this.isMe = false});
 
   @override
   Widget build(BuildContext context) {
     final g = controller.g;
     final p = g.players[seat];
     final isToAct = g.toAct == seat && !g.handOver;
-    final showCards = p.hasCards &&
-        (p.hole.isNotEmpty) &&
-        (p.revealed); // 对手只有摊牌才亮牌
     final isDealer = g.button == seat && g.handNumber > 0;
     final avatarB64 = controller.avatarsBySeat[seat];
 
@@ -681,33 +681,13 @@ class SeatView extends StatelessWidget {
             ? Colors.white12
             : Colors.white24;
 
-    // 底牌：摊牌亮真牌；持牌未摊显示牌背；未持牌/自己（底牌在底部信息条）不显示
-    final List<Widget> cardRow;
-    if (!p.hasCards || !showHole) {
-      cardRow = [];
-    } else if (showCards) {
-      cardRow = [
-        for (final c in p.hole)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 1),
-            child: CardView(card: c, width: 22, small: true),
-          ),
-      ];
-    } else {
-      cardRow = [
-        CardView.back(width: 22, small: true),
-        const SizedBox(width: 2),
-        CardView.back(width: 22, small: true),
-      ];
-    }
-
     final statusText = p.out
         ? '已出局'
         : p.allIn
             ? 'ALL-IN'
             : p.folded
                 ? '弃牌'
-                : (isToAct ? '思考中…' : '');
+                : (isToAct ? '行动中…' : '');
 
     return Opacity(
       opacity: p.folded ? 0.45 : 1,
@@ -734,7 +714,7 @@ class SeatView extends StatelessWidget {
               children: [
                 CircleAvatar(
                   radius: (width * 0.17).clamp(13.0, 22.0),
-                  backgroundColor: p.isAI ? Colors.teal : AppTheme.callBlue,
+                  backgroundColor: AppTheme.callBlue,
                   backgroundImage: (avatarB64 != null && avatarB64.isNotEmpty)
                       ? MemoryImage(base64Decode(avatarB64))
                       : null,
@@ -766,14 +746,6 @@ class SeatView extends StatelessWidget {
                     fontSize: 12,
                     color: AppTheme.gold,
                     fontWeight: FontWeight.bold)),
-            if (cardRow.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: cardRow,
-                ),
-              ),
             if (statusText.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
@@ -817,95 +789,7 @@ class SeatView extends StatelessWidget {
   }
 }
 
-// ---------------- 扑克牌 ----------------
-
-class CardView extends StatelessWidget {
-  static const _front = 0, _back = 1, _empty = 2;
-  final Card? card;
-  final double width;
-  final bool small;
-  final int _style;
-  const CardView({super.key, required this.card, this.width = 44, this.small = false})
-      : _style = _front;
-  const CardView.empty({super.key, this.width = 44, this.small = false})
-      : card = null,
-        _style = _empty;
-  const CardView.back({super.key, this.width = 44, this.small = false})
-      : card = null,
-        _style = _back;
-
-  @override
-  Widget build(BuildContext context) {
-    final h = width * 1.4;
-    if (_style != _front) {
-      return Container(
-        width: width,
-        height: h,
-        decoration: _style == _empty
-            ? BoxDecoration(
-                border: Border.all(color: Colors.white24, width: 1),
-                borderRadius: BorderRadius.circular(4),
-              )
-            : BoxDecoration(
-                gradient: const LinearGradient(
-                    colors: [Color(0xFF274b8f), Color(0xFF16294f)]),
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: Colors.white24, width: 1),
-              ),
-        alignment: Alignment.center,
-        child: _style == _empty
-            ? null
-            : Text('♠',
-                style: TextStyle(
-                    fontSize: width * 0.4,
-                    color: Colors.white.withOpacity(0.35))),
-      );
-    }
-    final c = card!;
-    final rankText = c.rank == 14
-        ? 'A'
-        : c.rank == 13
-            ? 'K'
-            : c.rank == 12
-                ? 'Q'
-                : c.rank == 11
-                    ? 'J'
-                    : c.rank == 10
-                        ? '10'
-                        : '${c.rank}';
-    final fontSize = small ? width * 0.52 : width * 0.42;
-    // 红桃/方块=红；梅花=蓝；黑桃=黑。梅花用蓝避免与黑桃混淆
-    final fg = c.isRed
-        ? AppTheme.cardRed
-        : (c.suit == 3 ? AppTheme.clubBlue : Colors.black87);
-    return Container(
-      width: width,
-      height: h,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: Colors.black26, width: 1),
-      ),
-      alignment: Alignment.center,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(rankText,
-              style: TextStyle(
-                  fontSize: fontSize,
-                  height: 1.0,
-                  fontWeight: FontWeight.bold,
-                  color: fg)),
-          Text(kSuitChars[c.suit],
-              style: TextStyle(
-                  fontSize: fontSize * 0.85, height: 1.0, color: fg)),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------- 自己的信息条（底部：头像 + 昵称筹码 + 大底牌） ----------------
+// ---------------- 自己的信息条（底部：头像 + 昵称筹码） ----------------
 
 class _HeroStrip extends StatelessWidget {
   final GameController controller;
@@ -929,7 +813,7 @@ class _HeroStrip extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 24,
-                backgroundColor: me.isAI ? Colors.teal : AppTheme.callBlue,
+                backgroundColor: AppTheme.callBlue,
                 backgroundImage:
                     avatarB64.isNotEmpty ? MemoryImage(base64Decode(avatarB64)) : null,
                 child: avatarB64.isEmpty
@@ -970,16 +854,6 @@ class _HeroStrip extends StatelessWidget {
             ],
           ),
           const Spacer(),
-          if (me.hole.isEmpty) ...[
-            CardView.back(width: 58),
-            const SizedBox(width: 6),
-            CardView.back(width: 58),
-          ] else
-            for (final card in me.hole)
-              Padding(
-                padding: const EdgeInsets.only(left: 6),
-                child: CardView(card: card, width: 58),
-              ),
         ],
       ),
     );
@@ -1068,16 +942,7 @@ class _ActionBarState extends State<_ActionBar> {
     final legal = myTurn ? g.legalActions(c.mySeat) : null;
 
     if (!myTurn || legal == null) {
-      final waiting = (g.toAct >= 0 && !g.handOver)
-          ? '${g.players[g.toAct].name} ${g.players[g.toAct].isAI ? "思考中…" : "行动中…"}'
-          : '等待下一手…';
-      return Container(
-        padding: const EdgeInsets.all(12),
-        color: AppTheme.panel,
-        child: Center(
-            child: Text(waiting,
-                style: const TextStyle(color: Colors.white54, fontSize: 14))),
-      );
+      return _IdleBar(controller: c);
     }
 
     final canCheck = legal.canCheck;
@@ -1234,6 +1099,144 @@ class _ActionBarState extends State<_ActionBar> {
   }
 }
 
+// ---------------- 等待/房主控制栏 ----------------
+
+/// 非本机行动时的底部栏：显示等待信息；
+/// 房主/单机在「本轮下注结束」时显示「进入下一轮」，在「河牌结束/仅剩一人」时显示「结算」。
+class _IdleBar extends StatelessWidget {
+  final GameController controller;
+  const _IdleBar({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = controller;
+    final g = c.g;
+    final isHost = c.mode != GameMode.client;
+
+    // 房主操作按钮集合
+    final List<Widget> hostButtons = [];
+    if (isHost) {
+      // 当前街道下注已结束、未到河牌 → 可推进到下一街道
+      if (g.streetDone && g.street != Street.river && !g.handOver) {
+        hostButtons.add(_hostButton(
+          label: '进入下一轮',
+          color: AppTheme.callBlue,
+          onTap: () => c.requestAdvanceStreet(),
+        ));
+      }
+      // 河牌下注结束，或仅剩一人未弃牌 → 可结算
+      final onlyOne = g.inHandPlayers.length <= 1 && !g.handOver;
+      if (!g.handOver &&
+          ((g.streetDone && g.street == Street.river) || onlyOne)) {
+        hostButtons.add(_hostButton(
+          label: '结算本手',
+          color: AppTheme.raiseGreen,
+          onTap: () => _showSettleDialog(context, c),
+        ));
+      }
+    }
+
+    final String waiting;
+    if (g.toAct >= 0 && !g.handOver && !g.streetDone) {
+      waiting = '${g.players[g.toAct].name} 行动中…';
+    } else if (g.streetDone && g.street != Street.river) {
+      waiting = '本轮下注结束，等待房主进入下一轮…';
+    } else if (g.streetDone && g.street == Street.river) {
+      waiting = '河牌下注结束，等待房主结算…';
+    } else {
+      waiting = '等待下一手…';
+    }
+
+    return Container(
+      color: AppTheme.panel,
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(waiting,
+              style: const TextStyle(color: Colors.white54, fontSize: 14)),
+          if (hostButtons.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (final b in hostButtons) ...[
+                  b,
+                  const SizedBox(width: 12),
+                ],
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _hostButton({
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return FilledButton(
+      style: FilledButton.styleFrom(
+          backgroundColor: color,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12)),
+      onPressed: onTap,
+      child: Text(label, style: const TextStyle(fontSize: 16)),
+    );
+  }
+
+  /// 弹出结算对话框：勾选赢家（可多选平分）。
+  void _showSettleDialog(BuildContext context, GameController c) {
+    final g = c.g;
+    final candidates = g.inHandPlayers;
+    final selected = <int>{};
+    showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: const Text('结算本手：勾选赢家'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final p in candidates)
+                CheckboxListTile(
+                  dense: true,
+                  value: selected.contains(p.seat),
+                  title: Text(p.name),
+                  onChanged: (v) => setState(() {
+                    if (v == true) {
+                      selected.add(p.seat);
+                    } else {
+                      selected.remove(p.seat);
+                    }
+                  }),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('取消')),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.raiseGreen),
+              onPressed: selected.isEmpty
+                  ? null
+                  : () {
+                      Navigator.pop(ctx);
+                      c.requestSettle(selected.toList());
+                    },
+              child: Text(
+                  selected.isEmpty ? '请勾选赢家' : '确认结算（平分底池）'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ---------------- 结算面板 ----------------
 
 class _ResultPanel extends StatelessWidget {
@@ -1247,17 +1250,11 @@ class _ResultPanel extends StatelessWidget {
     final lines = <Widget>[];
     r.seatWin.forEach((seat, win) {
       final p = g.players[seat];
-      final hn = r.handNames[seat];
       lines.add(Row(
         children: [
           Text('${p.name} 赢得 ${AppTheme.money(win)}',
               style: const TextStyle(
                   color: AppTheme.gold, fontWeight: FontWeight.bold)),
-          if (hn != null)
-            Padding(
-              padding: const EdgeInsets.only(left: 8),
-              child: Text('（$hn）', style: const TextStyle(color: Colors.white54)),
-            ),
         ],
       ));
     });
@@ -1268,30 +1265,9 @@ class _ResultPanel extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           ...lines,
-          if (r.reveal.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Wrap(
-                spacing: 10,
-                children: [
-                  for (final entry in r.reveal.entries)
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      Text(g.players[entry.key].name,
-                          style: const TextStyle(fontSize: 12)),
-                      const SizedBox(width: 4),
-                      for (final code in entry.value)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 2),
-                          child: CardView(
-                              card: Card.fromCode(code), width: 20, small: true),
-                        ),
-                    ]),
-                ],
-              ),
-            ),
           const Padding(
             padding: EdgeInsets.only(top: 8),
-            child: Text('看完桌面后，点“下一手”开始新手牌',
+            child: Text('本手结束。看完桌面后，点“下一手”开始新手牌',
                 style: TextStyle(fontSize: 12, color: Colors.white54)),
           ),
           Padding(
@@ -1367,7 +1343,6 @@ class _HostLobby extends StatefulWidget {
 }
 
 class _HostLobbyState extends State<_HostLobby> {
-  int _aiFill = 2;
   String _ip = '获取中…';
 
   @override
@@ -1383,7 +1358,7 @@ class _HostLobbyState extends State<_HostLobby> {
     final c = widget.controller;
     final hs = c.hostSession!;
     final clients = hs.pendingClients.entries.toList();
-    final total = 1 + clients.length + _aiFill;
+    final total = 1 + clients.length;
     return Scaffold(
       backgroundColor: AppTheme.bg,
       appBar: AppBar(title: const Text('房间等候中（同 WiFi）')),
@@ -1426,23 +1401,15 @@ class _HostLobbyState extends State<_HostLobby> {
                 style: const TextStyle(fontSize: 12, color: Colors.white70)),
           ),
           const Divider(),
-          Text('AI 补位数量：$_aiFill（总人数 $total / 10）',
+          Text('已连接 $total 人 / 最多 10 人（电子筹码模式，无 AI 补位）',
               style: const TextStyle(color: Colors.white70)),
-          Slider(
-            value: _aiFill.toDouble(),
-            min: 0,
-            max: 9,
-            divisions: 9,
-            label: '$_aiFill',
-            onChanged: (v) => setState(() => _aiFill = v.round()),
-          ),
           const SizedBox(height: 12),
           FilledButton(
             style: FilledButton.styleFrom(
                 backgroundColor: AppTheme.raiseGreen,
                 padding: const EdgeInsets.symmetric(vertical: 16)),
             onPressed: total >= 2
-                ? () => c.startNetworkGame(aiFill: _aiFill)
+                ? () => c.startNetworkGame(aiFill: 0)
                 : null,
             child: Text(total >= 2 ? '开始游戏' : '至少需要 2 名玩家',
                 style: const TextStyle(fontSize: 17)),

@@ -1,6 +1,0 @@
-name: poker_sim
-description: 德州扑克引擎离线验证脚本（直接调用真实引擎 lib/engine）
-environment:
-  sdk: '>=3.0.0 <4.0.0'
-dev_dependencies:
-  lints: ^3.0.0

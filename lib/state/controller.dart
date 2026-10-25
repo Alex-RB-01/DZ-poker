@@ -1,14 +1,12 @@
-/// 游戏控制器：绑定 引擎 + AI + 网络 + 盲注计时。
-/// 三种模式：local（单机 AI）、host（蓝牙房主）、client（蓝牙客人）。
+/// 游戏控制器：绑定 引擎 + 网络 + 盲注计时。
+/// 三种模式：local（单机记分）、host（局域网房主）、client（局域网客人）。
 library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
-import '../engine/ai.dart';
 import '../engine/game.dart';
 import '../net/session.dart';
 
@@ -17,7 +15,6 @@ enum GameMode { local, host, client }
 class GameController extends ChangeNotifier {
   final GameMode mode;
   GameState g; // 客户端模式下随快照重建，故不可 final
-  final Random rng;
   final String myName;
   String myGender = 'male'; // 本机玩家性别：'male' 男声 / 'female' 女声
 
@@ -42,7 +39,6 @@ class GameController extends ChangeNotifier {
   Map<int, String> get peerBySeat =>
       _seatByPeer.map((k, v) => MapEntry(v, k));
 
-  int _aiTicket = 0;
   Timer? _blindTimer;
   int _minutesAtLevel = 0;
 
@@ -50,29 +46,28 @@ class GameController extends ChangeNotifier {
     required this.mode,
     required String name,
     required GameConfig config,
-    int? seed,
   })  : myName = name,
-        rng = Random(seed),
-        g = GameState(config: config, rng: Random(seed));
+        g = GameState(config: config);
 
-  /// 单机 AI 模式：1 台手机即可玩
+  /// 单机记分模式：1 台手机当裁判/房主，本机为座位 0，
+  /// 其余 [playerCount]-1 个座位为「本地真人」座位（非 AI，各自在实体桌下注、由本机代点）。
   factory GameController.local(
       {required String myName,
-      required int aiCount,
+      required int playerCount,
       required GameConfig config,
       String myGender = 'male',
       int? seed}) {
     final c = GameController._(
-        mode: GameMode.local, name: myName, config: config, seed: seed);
+        mode: GameMode.local, name: myName, config: config);
     c.myGender = myGender;
     final roster = <PlayerSeed>[PlayerSeed(myName, gender: myGender)];
-    for (var i = 1; i <= aiCount && roster.length < 10; i++) {
-      roster.add(PlayerSeed('AI $i', isAI: true, gender: 'male'));
+    for (var i = 1; i < playerCount && roster.length < 10; i++) {
+      roster.add(PlayerSeed('玩家 ${i + 1}', isAI: false, gender: 'male'));
     }
     c.g.newGame(roster);
     c.g.startHand();
     c._startBlindTimerIfNeeded();
-    c._afterChange(); // 通知 UI 并启动首个 AI 行动（否则会卡在 AI 思考）
+    c._afterChange();
     return c;
   }
 
@@ -127,7 +122,7 @@ class GameController extends ChangeNotifier {
 
   // ---------- 主机 ----------
 
-  void startNetworkGame({required int aiFill}) {
+  void startNetworkGame({int aiFill = 0}) {
     final hs = hostSession;
     if (hs == null) return;
     final roster = <PlayerSeed>[PlayerSeed(myName, gender: myGender)];
@@ -141,11 +136,7 @@ class GameController extends ChangeNotifier {
       avatarsBySeat[seat] = _pendingAvatars[entry.key] ?? '';
       seat++;
     }
-    var ai = 1;
-    while (roster.length < 10 && ai <= aiFill) {
-      roster.add(PlayerSeed('AI $ai', isAI: true, gender: 'male'));
-      ai++;
-    }
+    // 电子筹码模式：无 AI 补位，仅已连入的真人玩家
     // 通知各客人座位号 + 全桌头像表
     _seatByPeer.forEach((peerId, s) {
       hs.sendTo(peerId, {'t': 'seat', 'seat': s});
@@ -189,6 +180,10 @@ class GameController extends ChangeNotifier {
         nextHand();
       case 'restart':
         restartMatch();
+      case 'advance':
+        advanceStreet();
+      case 'settle':
+        settleHand([for (final s in (msg['winners'] as List? ?? [])) (s as num).toInt()]);
       case 'action':
         final seat = _seatByPeer[peerId];
         if (seat != null) {
@@ -305,6 +300,40 @@ class GameController extends ChangeNotifier {
     }
   }
 
+  /// 房主推进到下一街道（翻牌/转牌/河牌）。客人发消息请房主推进。
+  void advanceStreet() {
+    if (mode == GameMode.client) return;
+    if (g.advanceStreet()) {
+      _afterChange();
+    }
+  }
+
+  /// 房主结算本手，把底池分给指定赢家（可多选平分）。客人发消息请房主结算。
+  void settleHand(List<int> winners) {
+    if (mode == GameMode.client) return;
+    if (g.settleHand(winners)) {
+      _afterChange();
+    }
+  }
+
+  /// 请求推进街道：房主/单机直接推进；客人发消息请房主推进。
+  void requestAdvanceStreet() {
+    if (mode == GameMode.client) {
+      clientSession?.sendAdvanceStreet();
+    } else {
+      advanceStreet();
+    }
+  }
+
+  /// 请求结算：房主/单机直接结算；客人发消息请房主结算。
+  void requestSettle(List<int> winners) {
+    if (mode == GameMode.client) {
+      clientSession?.sendSettle(winners);
+    } else {
+      settleHand(winners);
+    }
+  }
+
   void skipBlindLevel() {
     if (mode == GameMode.client) return;
     if (g.advanceLevel()) {
@@ -316,42 +345,6 @@ class GameController extends ChangeNotifier {
   void _afterChange() {
     _safeNotify();
     if (mode == GameMode.host) _broadcastSnapshots();
-    _scheduleAI();
-  }
-
-  void _scheduleAI() {
-    if (mode == GameMode.client) return;
-    _aiTicket++;
-    final ticket = _aiTicket;
-    if (g.gameOver) return;
-    if (g.handOver) {
-      // 一手结束后停在结算面板，等待「下一手」手动开牌（便于看清楚桌面输赢）
-      return;
-    }
-    if (g.toAct >= 0 && g.players[g.toAct].isAI) {
-      Future.delayed(Duration(milliseconds: 900 + rng.nextInt(800)), () {
-        if (ticket != _aiTicket ||
-            g.handOver ||
-            g.toAct < 0 ||
-            !g.players[g.toAct].isAI) {
-          return;
-        }
-        PokerAction a;
-        try {
-          a = AIPlayer.decide(g, rng);
-        } catch (_) {
-          // 决策异常时退化为安全动作，避免永久卡在“思考中”
-          final legal = g.legalActions(g.toAct);
-          a = legal.canCheck
-              ? const PokerAction('check')
-              : (legal.callAmount > 0 &&
-                      legal.callAmount <= g.players[g.toAct].chips
-                  ? const PokerAction('call')
-                  : const PokerAction('fold'));
-        }
-        applyAction(g.toAct, a);
-      });
-    }
   }
 
   void _startBlindTimerIfNeeded() {
@@ -373,7 +366,6 @@ class GameController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    _aiTicket++;
     _blindTimer?.cancel();
     try {
       if (mode == GameMode.host) hostSession?.stop();

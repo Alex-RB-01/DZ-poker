@@ -141,6 +141,20 @@ class ClientSession {
     transport.send(hp, jsonEncode({'t': 'next'}));
   }
 
+  /// 请求房主推进到下一街道（翻牌/转牌/河牌）
+  Future<void> sendAdvanceStreet() async {
+    final hp = hostPeerId;
+    if (hp == null) return;
+    transport.send(hp, jsonEncode({'t': 'advance'}));
+  }
+
+  /// 请求房主结算本手（携带赢家座位列表，支持多选平分）
+  Future<void> sendSettle(List<int> winners) async {
+    final hp = hostPeerId;
+    if (hp == null) return;
+    transport.send(hp, jsonEncode({'t': 'settle', 'winners': winners}));
+  }
+
   /// 请求房主重开一场新比赛（锦标赛结束后）
   Future<void> sendRestart() async {
     final hp = hostPeerId;
